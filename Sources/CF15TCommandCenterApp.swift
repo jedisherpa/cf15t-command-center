@@ -8,6 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let viewModel = CommandCenterViewModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        for app in NSRunningApplication.runningApplications(withBundleIdentifier: "com.paulcooper.cf15t-command-center") where app.processIdentifier != myPID {
+            app.forceTerminate()
+        }
+
         NSApp.setActivationPolicy(.regular)
         NSApp.appearance = NSAppearance(named: .darkAqua)
 
