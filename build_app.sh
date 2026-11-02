@@ -62,11 +62,12 @@ swiftc \
     "$PROJECT_DIR/Sources/AgentAndTaskMonitor.swift" \
     "$PROJECT_DIR/Sources/CursorSnapbackEngine.swift" \
     "$PROJECT_DIR/Sources/SiSTouchHardwareDriver.swift" \
+    "$PROJECT_DIR/Sources/KeepAwakeWorker.swift" \
     "$PROJECT_DIR/Sources/CommandCenterViewModel.swift" \
     "$PROJECT_DIR/Sources/VoiceSlotEditorSheet.swift" \
     "$PROJECT_DIR/Sources/CommandCenterViews.swift" \
     "$PROJECT_DIR/Sources/CF15TCommandCenterApp.swift" \
     -o "$MACOS_DIR/CF15TCommandCenter"
 
-codesign --force --deep --sign - "$APP_BUNDLE"
+codesign --force --deep --sign "Developer ID Application: Paul Cooper (X8BVJAF8W5)" "$APP_BUNDLE" 2>/dev/null || codesign --force --deep --sign - "$APP_BUNDLE"
 echo "Build complete: $APP_BUNDLE"

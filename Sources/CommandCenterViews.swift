@@ -283,26 +283,44 @@ struct SystemMicAndTouchGuardBox: View {
                 )
                 .tint(Color(red: 0.25, green: 0.92, blue: 0.60))
 
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Button(action: { viewModel.isShowingVoiceSlotEditor = true }) {
-                        Label("Edit A/B Slots", systemImage: "slider.horizontal.3")
+                        Label("A/B Slots", systemImage: "slider.horizontal.3")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundColor(.white)
-                            .padding(.horizontal, 8)
+                            .padding(.horizontal, 7)
                             .padding(.vertical, 4)
                             .background(Color.white.opacity(0.12))
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
 
+                    Button(action: { viewModel.keepAwakeEnabled.toggle() }) {
+                        Label(
+                            viewModel.keepAwakeEnabled ? "Awake ON" : "Awake OFF",
+                            systemImage: viewModel.keepAwakeEnabled ? "cup.and.saucer.fill" : "moon.zzz.fill"
+                        )
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(viewModel.keepAwakeEnabled ? .black : .white.opacity(0.8))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(
+                            viewModel.keepAwakeEnabled
+                                ? Color(red: 0.98, green: 0.78, blue: 0.22)
+                                : Color.white.opacity(0.10)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+
                     Button(action: { viewModel.cursorSnapbackEnabled.toggle() }) {
                         Label(
-                            viewModel.cursorSnapbackEnabled ? "Snapback ON" : "Snapback OFF",
+                            viewModel.cursorSnapbackEnabled ? "Snap ON" : "Snap OFF",
                             systemImage: viewModel.cursorSnapbackEnabled ? "cursorarrow.motionlines" : "cursorarrow"
                         )
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(viewModel.cursorSnapbackEnabled ? .black : .white.opacity(0.8))
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, 7)
                         .padding(.vertical, 4)
                         .background(
                             viewModel.cursorSnapbackEnabled

@@ -86,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Show CF15T Command Center", action: #selector(showMainWindowAction), keyEquivalent: "0")
         menu.addItem(withTitle: "Swap Voice Assistant (Grok Bot ⇄ Dot)", action: #selector(swapVoiceAction), keyEquivalent: "g")
         menu.addItem(withTitle: "Toggle Master Microphone Mute", action: #selector(toggleMasterMicAction), keyEquivalent: "m")
+        menu.addItem(withTitle: "Toggle Keep-Awake (Prevent Sleep & Screensaver)", action: #selector(toggleKeepAwakeAction), keyEquivalent: "k")
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Tile Open Windows (Center Stage + Border)", action: #selector(tileNowAction), keyEquivalent: "t")
         menu.addItem(withTitle: "Move Command Center to CF15T Screen", action: #selector(moveToCF15TAction), keyEquivalent: "")
@@ -110,6 +111,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleMasterMicAction() {
         viewModel.toggleSystemMasterMicMute()
+    }
+
+    @objc private func toggleKeepAwakeAction() {
+        viewModel.keepAwakeEnabled.toggle()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        KeepAwakeWorker.shared.stop()
     }
 
     @objc private func tileNowAction() {

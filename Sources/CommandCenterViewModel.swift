@@ -36,6 +36,14 @@ final class CommandCenterViewModel: ObservableObject {
             CursorSnapbackEngine.shared.isSnapbackEnabled = cursorSnapbackEnabled
         }
     }
+    @Published var keepAwakeEnabled: Bool = true {
+        didSet {
+            KeepAwakeWorker.shared.setKeepAwake(enabled: keepAwakeEnabled)
+            statusBannerMessage = keepAwakeEnabled
+                ? "Keep-Awake Worker ON — Sleep & Screensaver blocked on both screens"
+                : "Keep-Awake Worker OFF — Standard macOS sleep timers restored"
+        }
+    }
     @Published var sisHardwareConnected: Bool = false
     @Published var sisIsTouching: Bool = false
     @Published var sisNormalizedPoint: CGPoint = CGPoint(x: 0.5, y: 0.5)
@@ -60,6 +68,7 @@ final class CommandCenterViewModel: ObservableObject {
         isAccessibilityGranted = WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: false)
         CursorSnapbackEngine.shared.isSnapbackEnabled = cursorSnapbackEnabled
         CursorSnapbackEngine.shared.startMonitoring()
+        KeepAwakeWorker.shared.setKeepAwake(enabled: keepAwakeEnabled)
 
         SiSTouchHardwareDriver.shared.isRemapToCF15TEnabled = sisRemapToCF15TEnabled
         SiSTouchHardwareDriver.shared.onTouchStateChanged = { [weak self] connected, touching, pt, contacts in
