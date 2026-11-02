@@ -55,11 +55,13 @@ swiftc \
     -framework ApplicationServices \
     -framework CoreAudio \
     -framework AudioToolbox \
+    -framework IOKit \
     "$PROJECT_DIR/Sources/Models.swift" \
     "$PROJECT_DIR/Sources/CoreAudioMicManager.swift" \
     "$PROJECT_DIR/Sources/WindowTilingEngine.swift" \
     "$PROJECT_DIR/Sources/AgentAndTaskMonitor.swift" \
     "$PROJECT_DIR/Sources/CursorSnapbackEngine.swift" \
+    "$PROJECT_DIR/Sources/SiSTouchHardwareDriver.swift" \
     "$PROJECT_DIR/Sources/CommandCenterViewModel.swift" \
     "$PROJECT_DIR/Sources/VoiceSlotEditorSheet.swift" \
     "$PROJECT_DIR/Sources/CommandCenterViews.swift" \

@@ -61,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.backgroundColor = NSColor(calibratedRed: 0.05, green: 0.06, blue: 0.09, alpha: 1.0)
         window.contentViewController = hostingController
         window.minSize = NSSize(width: 1024, height: 640)
+        window.setFrame(initialFrame, display: true)
         window.collectionBehavior = [.managed, .fullScreenPrimary]
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

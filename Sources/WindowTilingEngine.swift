@@ -53,7 +53,9 @@ final class WindowTilingEngine {
         let ignoredOwners: Set<String> = [
             "WindowServer", "Control Center", "Notification Center", "SystemUIServer",
             "Dock", "Spotlight", "Wallpaper", "TextInputMenuAgent", "UniversalControl",
-            "CursorUIViewService", "ScreenCaptureKit", "loginwindow"
+            "CursorUIViewService", "ScreenCaptureKit", "loginwindow",
+            "universalAccessAuthWarn", "MobileDeviceUpdater", "CoreServicesUIAgent",
+            "UserNotificationCenter", "SecurityAgent"
         ]
 
         for entry in infoList {
@@ -196,26 +198,48 @@ final class WindowTilingEngine {
     // MARK: - Compute Tiling Geometry (Quartz Top-Left Origin Coordinates)
 
     func computeLayoutFrames(count: Int, canvas: CGRect, mode: TilingLayoutMode, gap: CGFloat = 10) -> [CGRect] {
-        guard count > 0 else { return [] }
+        guard count > 0,
+              !canvas.isNull,
+              !canvas.isInfinite,
+              canvas.width.isFinite,
+              canvas.height.isFinite,
+              canvas.width >= 160,
+              canvas.height >= 120 else {
+            return []
+        }
         let insetCanvas = canvas.insetBy(dx: gap, dy: gap)
+        guard insetCanvas.width >= 100, insetCanvas.height >= 80 else {
+            return []
+        }
 
         if count == 1 {
-            return [insetCanvas]
+            return [sanitizeRect(insetCanvas)]
         }
 
+        let rawRects: [CGRect]
         switch mode {
         case .centerStageBorder:
-            return computeCenterStageWithPerimeterBorder(count: count, area: insetCanvas, gap: gap)
+            rawRects = computeCenterStageWithPerimeterBorder(count: count, area: insetCanvas, gap: gap)
 
         case .leftStagePerimeter:
-            return computeLeftStageWithRightBottomBorder(count: count, area: insetCanvas, gap: gap)
+            rawRects = computeLeftStageWithRightBottomBorder(count: count, area: insetCanvas, gap: gap)
 
         case .equalSimultaneousGrid:
-            return computeEqualGrid(count: count, area: insetCanvas, gap: gap)
+            rawRects = computeEqualGrid(count: count, area: insetCanvas, gap: gap)
 
         case .dualVoiceSplit:
-            return computeDualSplitWithBottomBorder(count: count, area: insetCanvas, gap: gap)
+            rawRects = computeDualSplitWithBottomBorder(count: count, area: insetCanvas, gap: gap)
         }
+
+        return rawRects.map { sanitizeRect($0) }
+    }
+
+    private func sanitizeRect(_ r: CGRect) -> CGRect {
+        let safeX = (r.origin.x.isFinite && !r.origin.x.isNaN) ? r.origin.x : 0
+        let safeY = (r.origin.y.isFinite && !r.origin.y.isNaN) ? r.origin.y : 0
+        let safeW = (r.size.width.isFinite && !r.size.width.isNaN) ? max(48, r.size.width) : 120
+        let safeH = (r.size.height.isFinite && !r.size.height.isNaN) ? max(36, r.size.height) : 80
+        return CGRect(x: safeX, y: safeY, width: safeW, height: safeH)
     }
 
     /// Places the active window large in the center (or center-top) and arranges all other windows around the border

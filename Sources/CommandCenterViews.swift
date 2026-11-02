@@ -499,7 +499,11 @@ struct InteractiveWindowTileCard: View {
             ZStack(alignment: .bottomLeading) {
                 // Background Live Snapshot or Stylized Card
                 GeometryReader { cardGeo in
-                    if let preview = window.previewImage {
+                    if let preview = window.previewImage,
+                       preview.size.width > 4,
+                       preview.size.height > 4,
+                       cardGeo.size.width > 10,
+                       cardGeo.size.height > 10 {
                         Image(nsImage: preview)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -867,12 +871,38 @@ struct BottomStatusStrip: View {
     @ObservedObject var viewModel: CommandCenterViewModel
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
+            // Live SiS HID Touch Controller Hardware Badge
+            Button(action: {
+                viewModel.sisRemapToCF15TEnabled.toggle()
+            }) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(
+                            viewModel.sisIsTouching
+                                ? Color(red: 1.0, green: 0.42, blue: 0.20)
+                                : (viewModel.sisHardwareConnected
+                                    ? Color(red: 0.20, green: 0.92, blue: 0.60)
+                                    : Color.white.opacity(0.35))
+                        )
+                        .frame(width: 9, height: 9)
+                    Text(
+                        viewModel.sisIsTouching
+                            ? String(format: "SiS TOUCH (%.0f%%, %.0f%%)", viewModel.sisNormalizedPoint.x * 100, viewModel.sisNormalizedPoint.y * 100)
+                            : (viewModel.sisHardwareConnected ? "SiS 0x0457:0x0819 (\(viewModel.sisRemapToCF15TEnabled ? "CF15T Mapped" : "Raw"))" : "SiS Touch Offline")
+                    )
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.09))
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+            }
+            .buttonStyle(.plain)
+
             // Live Status Pill
             HStack(spacing: 8) {
-                Circle()
-                    .fill(Color(red: 0.20, green: 0.92, blue: 0.60))
-                    .frame(width: 9, height: 9)
                 Text(viewModel.statusBannerMessage)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white.opacity(0.9))

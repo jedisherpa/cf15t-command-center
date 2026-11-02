@@ -36,6 +36,15 @@ final class CommandCenterViewModel: ObservableObject {
             CursorSnapbackEngine.shared.isSnapbackEnabled = cursorSnapbackEnabled
         }
     }
+    @Published var sisHardwareConnected: Bool = false
+    @Published var sisIsTouching: Bool = false
+    @Published var sisNormalizedPoint: CGPoint = CGPoint(x: 0.5, y: 0.5)
+    @Published var sisContactCount: Int = 0
+    @Published var sisRemapToCF15TEnabled: Bool = true {
+        didSet {
+            SiSTouchHardwareDriver.shared.isRemapToCF15TEnabled = sisRemapToCF15TEnabled
+        }
+    }
     @Published var isAccessibilityGranted: Bool = false
     @Published var connectedScreenCount: Int = 1
     @Published var statusBannerMessage: String = "Ready — Tap any border window to expand it Center Stage"
@@ -51,6 +60,16 @@ final class CommandCenterViewModel: ObservableObject {
         isAccessibilityGranted = WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: false)
         CursorSnapbackEngine.shared.isSnapbackEnabled = cursorSnapbackEnabled
         CursorSnapbackEngine.shared.startMonitoring()
+
+        SiSTouchHardwareDriver.shared.isRemapToCF15TEnabled = sisRemapToCF15TEnabled
+        SiSTouchHardwareDriver.shared.onTouchStateChanged = { [weak self] connected, touching, pt, contacts in
+            guard let self = self else { return }
+            self.sisHardwareConnected = connected
+            self.sisIsTouching = touching
+            self.sisNormalizedPoint = pt
+            self.sisContactCount = contacts
+        }
+        SiSTouchHardwareDriver.shared.start()
 
         refreshAudioState()
         refreshAll(captureImages: true)
@@ -71,7 +90,8 @@ final class CommandCenterViewModel: ObservableObject {
     // MARK: - Computed Stage & Border Windows
 
     var visibleTiledWindows: [MonitoredWindow] {
-        openWindows.filter { !excludedWindowIDs.contains($0.id) }
+        let filtered = openWindows.filter { !excludedWindowIDs.contains($0.id) }
+        return Array(filtered.prefix(9))
     }
 
     var currentStageWindow: MonitoredWindow? {
