@@ -1,0 +1,7 @@
+# macOS & Build Artifacts
+.DS_Store
+*.app/
+build/
+.build/
+*.xcuserdata
+*.dSYM/
