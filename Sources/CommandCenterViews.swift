@@ -35,6 +35,29 @@ struct CommandCenterMainView: View {
                 endPoint: .bottomTrailing
             )
         )
+        .overlay(
+            GeometryReader { fullGeo in
+                ZStack {
+                    ForEach(viewModel.sisActiveContacts) { contact in
+                        let cx = contact.normalizedX * fullGeo.size.width
+                        let cy = contact.normalizedY * fullGeo.size.height
+                        ZStack {
+                            Circle()
+                                .stroke(Color(red: 0.20, green: 0.96, blue: 0.68), lineWidth: 3)
+                                .frame(width: 64, height: 64)
+                            Circle()
+                                .fill(Color(red: 1.0, green: 0.42, blue: 0.20).opacity(0.35))
+                                .frame(width: 44, height: 44)
+                            Text("#\(contact.id)")
+                                .font(.system(size: 11, weight: .black, design: .monospaced))
+                                .foregroundColor(.white)
+                        }
+                        .position(x: cx, y: cy)
+                    }
+                }
+            }
+            .allowsHitTesting(false)
+        )
         .sheet(isPresented: $viewModel.isShowingVoiceSlotEditor) {
             VoiceSlotEditorSheet(viewModel: viewModel)
         }
@@ -492,12 +515,35 @@ struct InteractiveWindowTileCard: View {
     let onFocusOnly: () -> Void
     let onExclude: () -> Void
 
+    private var appThemeColor: Color {
+        if let plat = window.platform {
+            return plat.accentColor
+        }
+        let lower = window.appName.lowercased()
+        if lower.contains("chrome") || lower.contains("safari") {
+            return Color(red: 0.25, green: 0.62, blue: 1.0)
+        } else if lower.contains("whatsapp") {
+            return Color(red: 0.18, green: 0.85, blue: 0.46)
+        } else if lower.contains("signal") {
+            return Color(red: 0.35, green: 0.48, blue: 0.98)
+        } else if lower.contains("music") || lower.contains("spotify") {
+            return Color(red: 0.96, green: 0.32, blue: 0.55)
+        } else if lower.contains("settings") {
+            return Color(red: 0.95, green: 0.72, blue: 0.22)
+        } else if lower.contains("finder") {
+            return Color(red: 0.28, green: 0.78, blue: 0.98)
+        } else if lower.contains("preview") || lower.contains("textedit") {
+            return Color(red: 0.65, green: 0.52, blue: 0.96)
+        }
+        return Color(red: 0.35, green: 0.78, blue: 1.0)
+    }
+
     var body: some View {
-        let accent = window.platform?.accentColor ?? Color(red: 0.35, green: 0.78, blue: 1.0)
+        let accent = appThemeColor
 
         Button(action: onTapPromote) {
             ZStack(alignment: .bottomLeading) {
-                // Background Live Snapshot or Stylized Card
+                // Background Live Snapshot or Distinct Color-Coded App Card
                 GeometryReader { cardGeo in
                     if let preview = window.previewImage,
                        preview.size.width > 4,
@@ -514,18 +560,36 @@ struct InteractiveWindowTileCard: View {
                         ZStack {
                             LinearGradient(
                                 colors: [
-                                    Color(red: 0.13, green: 0.17, blue: 0.25),
-                                    Color(red: 0.08, green: 0.10, blue: 0.16)
+                                    accent.opacity(isCenterStage ? 0.34 : 0.20),
+                                    Color(red: 0.07, green: 0.09, blue: 0.14)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
-                            if let icon = window.appIcon {
-                                Image(nsImage: icon)
-                                    .resizable()
-                                    .frame(width: isCenterStage ? 72 : 42, height: isCenterStage ? 72 : 42)
-                                    .opacity(0.85)
+
+                            VStack(spacing: isCenterStage ? 12 : 6) {
+                                if let icon = window.appIcon {
+                                    Image(nsImage: icon)
+                                        .resizable()
+                                        .frame(width: isCenterStage ? 84 : 44, height: isCenterStage ? 84 : 44)
+                                        .shadow(color: .black.opacity(0.45), radius: 8, x: 0, y: 4)
+                                }
+                                Text(window.appName)
+                                    .font(.system(size: isCenterStage ? 26 : 14, weight: .black, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+
+                                if isCenterStage {
+                                    Text("ACTIVE STAGE WINDOW — TAP ANY BORDER TILE TO SWAP")
+                                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                                        .foregroundColor(Color(red: 0.25, green: 0.96, blue: 0.68))
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 5)
+                                        .background(Color.black.opacity(0.45))
+                                        .clipShape(Capsule())
+                                }
                             }
+                            .padding(.top, 18)
                         }
                     }
                 }

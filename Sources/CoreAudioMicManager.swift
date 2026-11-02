@@ -210,7 +210,14 @@ final class CoreAudioMicManager {
                    name.localizedCaseInsensitiveContains(slot.displayName) ||
                    (app.bundleURL?.path.lowercased() == slot.appBundlePath.lowercased())
         }) {
+            NSApp.yieldActivation(to: match)
+            match.unhide()
             match.activate(options: [.activateAllWindows])
+            if let bundleURL = match.bundleURL {
+                let config = NSWorkspace.OpenConfiguration()
+                config.activates = true
+                NSWorkspace.shared.openApplication(at: bundleURL, configuration: config, completionHandler: nil)
+            }
             return true
         }
 

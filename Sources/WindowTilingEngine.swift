@@ -144,12 +144,26 @@ final class WindowTilingEngine {
 
     func focusWindow(_ window: MonitoredWindow) {
         if let app = NSRunningApplication(processIdentifier: window.ownerPID) {
+            NSApp.yieldActivation(to: app)
+            app.unhide()
             app.activate(options: [.activateAllWindows])
+            if let bundleURL = app.bundleURL {
+                let config = NSWorkspace.OpenConfiguration()
+                config.activates = true
+                NSWorkspace.shared.openApplication(at: bundleURL, configuration: config, completionHandler: nil)
+            }
         }
         if let axWin = findAXWindow(for: window) {
             AXUIElementSetAttributeValue(axWin, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
             AXUIElementPerformAction(axWin, kAXRaiseAction as CFString)
             AXUIElementSetAttributeValue(axWin, kAXMainAttribute as CFString, kCFBooleanTrue)
+        }
+    }
+
+    func openSystemAccessibilitySettings() {
+        _ = isAccessibilityTrusted(promptIfNeeded: true)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -184,6 +198,7 @@ final class WindowTilingEngine {
             let targetFrame = frames[index].integral
             applyFrame(targetFrame, to: win, raise: true, activateApp: index == 0)
         }
+        focusWindow(stageWindow)
     }
 
     func restoreOriginalWindowFrames(windows: [MonitoredWindow]) {

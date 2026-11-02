@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         self.mainWindow = window
+        SiSTouchHardwareDriver.shared.targetCommandCenterWindow = window
     }
 
     private func setupMenuBarStatusItem() {

@@ -39,7 +39,7 @@ final class CommandCenterViewModel: ObservableObject {
     @Published var sisHardwareConnected: Bool = false
     @Published var sisIsTouching: Bool = false
     @Published var sisNormalizedPoint: CGPoint = CGPoint(x: 0.5, y: 0.5)
-    @Published var sisContactCount: Int = 0
+    @Published var sisActiveContacts: [SiSTouchContact] = []
     @Published var sisRemapToCF15TEnabled: Bool = true {
         didSet {
             SiSTouchHardwareDriver.shared.isRemapToCF15TEnabled = sisRemapToCF15TEnabled
@@ -67,7 +67,7 @@ final class CommandCenterViewModel: ObservableObject {
             self.sisHardwareConnected = connected
             self.sisIsTouching = touching
             self.sisNormalizedPoint = pt
-            self.sisContactCount = contacts
+            self.sisActiveContacts = contacts
         }
         SiSTouchHardwareDriver.shared.start()
 
@@ -146,23 +146,29 @@ final class CommandCenterViewModel: ObservableObject {
             stageWindowID = window.id
         }
 
-        if autoTileRealWindowsOnTap {
-            applyRealScreenTilingNow(stageWindow: window)
+        // Always bring the selected application/window to the front immediately
+        WindowTilingEngine.shared.focusWindow(window)
+
+        if autoTileRealWindowsOnTap && WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: false) {
+            applyRealScreenTilingNow(stageWindow: window, promptIfUntrusted: false)
         } else {
-            WindowTilingEngine.shared.focusWindow(window)
-            statusBannerMessage = "Focused \(window.appName): \(window.displayTitle)"
+            statusBannerMessage = "Switched to \(window.appName) (\(Int(window.bounds.width))×\(Int(window.bounds.height)))"
         }
     }
 
-    func applyRealScreenTilingNow(stageWindow: MonitoredWindow? = nil) {
+    func applyRealScreenTilingNow(stageWindow: MonitoredWindow? = nil, promptIfUntrusted: Bool = true) {
         guard let stage = stageWindow ?? currentStageWindow else {
             statusBannerMessage = "No open windows available to tile"
             return
         }
 
-        if !WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: true) {
-            statusBannerMessage = "Grant Accessibility permission in System Settings to physically resize app windows"
-            WindowTilingEngine.shared.focusWindow(stage)
+        WindowTilingEngine.shared.focusWindow(stage)
+
+        if !WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: promptIfUntrusted) {
+            if promptIfUntrusted {
+                WindowTilingEngine.shared.openSystemAccessibilitySettings()
+            }
+            statusBannerMessage = "Activated \(stage.appName) — Toggle ON 'CF15T Command Center' in Accessibility to resize windows"
             return
         }
 
@@ -175,7 +181,6 @@ final class CommandCenterViewModel: ObservableObject {
         )
 
         statusBannerMessage = "Tiled \(1 + borders.count) windows (\(tilingMode.shortLabel)) — Stage: \(stage.appName)"
-        // Refresh window snapshots after tiling settles
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             self?.refreshAll(captureImages: true)
         }
@@ -312,7 +317,14 @@ final class CommandCenterViewModel: ObservableObject {
             return
         }
         if let pid = snapshot.primaryPID, let app = NSRunningApplication(processIdentifier: pid) {
+            NSApp.yieldActivation(to: app)
+            app.unhide()
             app.activate(options: [.activateAllWindows])
+            if let bundleURL = app.bundleURL {
+                let cfg = NSWorkspace.OpenConfiguration()
+                cfg.activates = true
+                NSWorkspace.shared.openApplication(at: bundleURL, configuration: cfg, completionHandler: nil)
+            }
             statusBannerMessage = "Activated \(snapshot.platform.rawValue)"
             return
         }
@@ -334,8 +346,8 @@ final class CommandCenterViewModel: ObservableObject {
     }
 
     func requestAccessibilityPermission() {
-        _ = WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: true)
-        statusBannerMessage = "Prompted macOS Accessibility dialog for window tiling"
+        WindowTilingEngine.shared.openSystemAccessibilitySettings()
+        statusBannerMessage = "Opened System Settings → Accessibility (toggle ON 'CF15T Command Center')"
     }
 
     // MARK: - Persistence for Voice Slots
