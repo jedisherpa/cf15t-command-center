@@ -56,7 +56,9 @@ swiftc \
     -framework CoreAudio \
     -framework AudioToolbox \
     -framework IOKit \
+    -framework Vision \
     "$PROJECT_DIR/Sources/Models.swift" \
+    "$PROJECT_DIR/Sources/AppContentFeedExtractor.swift" \
     "$PROJECT_DIR/Sources/CoreAudioMicManager.swift" \
     "$PROJECT_DIR/Sources/WindowTilingEngine.swift" \
     "$PROJECT_DIR/Sources/AgentAndTaskMonitor.swift" \

@@ -710,58 +710,41 @@ struct InteractiveWindowTileCard: View {
 
         Button(action: onTapPromote) {
             ZStack(alignment: .bottomLeading) {
-                // Background Live Window Preview
+                // Background: Subtle Darkened Window Watermark + High-Contrast Simplified Live App Display
                 GeometryReader { cardGeo in
-                    if let preview = window.previewImage,
-                       preview.size.width > 4,
-                       preview.size.height > 4,
-                       cardGeo.size.width > 10,
-                       cardGeo.size.height > 10 {
-                        Image(nsImage: preview)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: cardGeo.size.width, height: cardGeo.size.height)
-                            .clipped()
-                            .overlay(Color.black.opacity(isCenterStage ? 0.06 : 0.26))
-                    } else {
-                        ZStack {
-                            LinearGradient(
-                                colors: [
-                                    accent.opacity(isCenterStage ? 0.38 : 0.22),
-                                    Color(red: 0.05, green: 0.07, blue: 0.11)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
+                    ZStack {
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.05, green: 0.07, blue: 0.12),
+                                Color(red: 0.03, green: 0.05, blue: 0.09)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
 
-                            VStack(spacing: isCenterStage ? 10 : 4) {
-                                if let icon = window.appIcon {
-                                    Image(nsImage: icon)
-                                        .resizable()
-                                        .frame(width: isCenterStage ? 86 : 40, height: isCenterStage ? 86 : 40)
-                                        .shadow(color: accent.opacity(0.6), radius: 10)
-                                }
-
-                                Text(window.appName.uppercased())
-                                    .font(.system(size: isCenterStage ? 26 : 13, weight: .black, design: .monospaced))
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
-
-                                if isCenterStage {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                        Text("ACTIVE MAIN STAGE // TAP ANY BORDER WINDOW TO SWAP HERE")
-                                            .font(.system(size: 11, weight: .black, design: .monospaced))
-                                    }
-                                    .foregroundColor(Color(red: 0.15, green: 1.0, blue: 0.62))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 5)
-                                    .background(Color.black.opacity(0.65))
-                                    .clipShape(CockpitChamferShape(topLeftCut: 6, topRightCut: 6, bottomRightCut: 6, bottomLeftCut: 6))
-                                }
-                            }
-                            .padding(.top, 14)
+                        if let preview = window.previewImage,
+                           preview.size.width > 4,
+                           preview.size.height > 4,
+                           cardGeo.size.width > 10,
+                           cardGeo.size.height > 10 {
+                            Image(nsImage: preview)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: cardGeo.size.width, height: cardGeo.size.height)
+                                .clipped()
+                                .opacity(0.15)
                         }
+
+                        // Super-Simplified Live App Display (Messages / Response Thread / Active Items)
+                        SimplifiedAppContentView(
+                            window: window,
+                            accent: accent,
+                            isCenterStage: isCenterStage,
+                            cardSize: cardGeo.size
+                        )
+                        .padding(.top, isCenterStage ? 34 : 28)
+                        .padding(.bottom, isCenterStage ? 30 : 24)
+                        .padding(.horizontal, isCenterStage ? 12 : 8)
                     }
                 }
 
@@ -918,11 +901,202 @@ struct InteractiveWindowTileCard: View {
     }
 }
 
+// MARK: - 2B. Super-Simplified Live App Display (Messages / AI Response Threads / Active Content)
+
+struct SimplifiedAppContentView: View {
+    let window: MonitoredWindow
+    let accent: Color
+    let isCenterStage: Bool
+    let cardSize: CGSize
+
+    private var digest: WindowLiveDigest {
+        window.liveDigest ?? AppContentFeedExtractor.shared.extractLiveDigest(for: window)
+    }
+
+    private var maxVisibleLines: Int {
+        if isCenterStage {
+            return 5
+        }
+        if cardSize.height < 130 {
+            return 2
+        } else if cardSize.height < 195 {
+            return 3
+        } else {
+            return 4
+        }
+    }
+
+    var body: some View {
+        let visibleLines = Array(digest.lines.suffix(maxVisibleLines))
+        let showSideMiniPreview = isCenterStage && cardSize.width > 520 && window.previewImage != nil
+
+        HStack(spacing: 10) {
+            // Left / Main Column: Simplified High-Contrast Live Feed (Messages or Response Thread)
+            VStack(alignment: .leading, spacing: isCenterStage ? 6 : 4) {
+                // Context Header Bar (Active Contact / Thread Title + Live Feed Type Badge)
+                HStack(spacing: 6) {
+                    if let icon = window.appIcon {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .frame(width: isCenterStage ? 18 : 14, height: isCenterStage ? 18 : 14)
+                    }
+
+                    Text(digest.contextTitle.uppercased())
+                        .font(.system(size: isCenterStage ? 11 : 9, weight: .black, design: .monospaced))
+                        .foregroundColor(accent)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 4)
+
+                    Text(digest.statusBadge)
+                        .font(.system(size: isCenterStage ? 8.5 : 7.5, weight: .black, design: .monospaced))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(accent.opacity(0.22))
+                        .foregroundColor(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+                .padding(.bottom, 1)
+
+                // Simplified Message Bubbles / Response Thread Lines
+                VStack(alignment: .leading, spacing: isCenterStage ? 5 : 3.5) {
+                    ForEach(visibleLines) { line in
+                        SimplifiedDigestLineBubble(
+                            line: line,
+                            style: digest.style,
+                            accent: accent,
+                            isCenterStage: isCenterStage
+                        )
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Right Mini-Monitor Thumbnail inside #1 Main Stage so you see both Live Text AND Window Visual
+            if showSideMiniPreview, let preview = window.previewImage {
+                VStack(spacing: 4) {
+                    Image(nsImage: preview)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: cardSize.width * 0.33, maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(accent.opacity(0.55), lineWidth: 1.2)
+                        )
+
+                    Text("LIVE WINDOW VIEW")
+                        .font(.system(size: 7.5, weight: .black, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.55))
+                }
+                .frame(width: cardSize.width * 0.33)
+            }
+        }
+    }
+}
+
+struct SimplifiedDigestLineBubble: View {
+    let line: DigestFeedLine
+    let style: DigestPresentationStyle
+    let accent: Color
+    let isCenterStage: Bool
+
+    var body: some View {
+        let isUserOrOutgoing = !line.isIncomingOrAgent || (line.speakerOrTag == "YOU")
+        let isToolLine = (line.speakerOrTag == "TOOL")
+
+        let badgeColor: Color = {
+            if isUserOrOutgoing {
+                return Color(red: 1.0, green: 0.78, blue: 0.18)
+            } else if isToolLine {
+                return Color(red: 0.20, green: 0.88, blue: 1.0)
+            } else if line.isHighlighted {
+                return Color(red: 0.15, green: 1.0, blue: 0.62)
+            } else {
+                return accent
+            }
+        }()
+
+        HStack(alignment: .top, spacing: 6) {
+            if isUserOrOutgoing && style == .messagingChat {
+                Spacer(minLength: isCenterStage ? 28 : 12)
+            }
+
+            // Left Accent Indicator Bar
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(badgeColor)
+                .frame(width: 3)
+
+            VStack(alignment: .leading, spacing: 1.5) {
+                HStack(spacing: 5) {
+                    if let speaker = line.speakerOrTag {
+                        Text(speaker)
+                            .font(.system(size: isCenterStage ? 8.5 : 7.5, weight: .black, design: .monospaced))
+                            .foregroundColor(badgeColor)
+                    }
+
+                    if line.isHighlighted {
+                        Circle()
+                            .fill(Color(red: 0.15, green: 1.0, blue: 0.62))
+                            .frame(width: 5, height: 5)
+                    }
+                }
+
+                Text(line.text)
+                    .font(.system(
+                        size: isCenterStage ? 11.5 : 9.5,
+                        weight: line.isHighlighted ? .bold : .medium,
+                        design: style == .aiAgentThread ? .monospaced : .default
+                    ))
+                    .foregroundColor(line.isHighlighted ? .white : .white.opacity(0.88))
+                    .lineLimit(isCenterStage ? 2 : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, isCenterStage ? 8 : 6)
+            .padding(.vertical, isCenterStage ? 5 : 3.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(
+                        isUserOrOutgoing
+                            ? Color(red: 0.16, green: 0.14, blue: 0.08).opacity(0.90)
+                            : (line.isHighlighted
+                                ? Color(red: 0.07, green: 0.16, blue: 0.18).opacity(0.92)
+                                : Color.black.opacity(0.75))
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(
+                        line.isHighlighted ? badgeColor.opacity(0.80) : Color.white.opacity(0.10),
+                        lineWidth: line.isHighlighted ? 1.2 : 0.7
+                    )
+            )
+        }
+    }
+}
+
 // MARK: - 3. Right Side Tower: ECU Engine Diagnostics & Pit Crew Agents
 
 struct AgentAndTasksSidePanel: View {
     @ObservedObject var viewModel: CommandCenterViewModel
     @State private var selectedTab: Int = 0 // 0 = AI Engines, 1 = ECU Tasks
+
+    private func latestFeedSummary(for snap: AgentStatusSnapshot) -> String? {
+        if let win = viewModel.openWindows.first(where: { $0.platform == snap.platform }),
+           let lastLine = win.liveDigest?.lines.last?.text,
+           !lastLine.isEmpty {
+            return lastLine
+        }
+        if snap.platform == .antigravity,
+           let agyDigest = AppContentFeedExtractor.shared.buildAntigravityLiveDigest(window: nil),
+           let lastLine = agyDigest.lines.last?.text {
+            return lastLine
+        }
+        return snap.activeWindowTitle ?? snap.activeSubtaskSummary
+    }
 
     var body: some View {
         let panelShape = CockpitChamferShape(topLeftCut: 18, topRightCut: 18, bottomRightCut: 18, bottomLeftCut: 18)
@@ -971,7 +1145,10 @@ struct AgentAndTasksSidePanel: View {
                 ScrollView {
                     LazyVStack(spacing: 7) {
                         ForEach(viewModel.agentSnapshots) { snap in
-                            AgentPlatformRowCard(snapshot: snap) {
+                            AgentPlatformRowCard(
+                                snapshot: snap,
+                                liveThreadSnippet: latestFeedSummary(for: snap)
+                            ) {
                                 viewModel.activateOrLaunchPlatform(snap)
                             }
                         }
@@ -1007,6 +1184,7 @@ struct AgentAndTasksSidePanel: View {
 
 struct AgentPlatformRowCard: View {
     let snapshot: AgentStatusSnapshot
+    let liveThreadSnippet: String?
     let onTap: () -> Void
 
     var body: some View {
@@ -1018,7 +1196,7 @@ struct AgentPlatformRowCard: View {
                 // Left Vertical Accent Bar
                 Rectangle()
                     .fill(snapshot.state == .offline ? Color.white.opacity(0.15) : snapshot.platform.accentColor)
-                    .frame(width: 4, height: 42)
+                    .frame(width: 4, height: 48)
 
                 if let icon = snapshot.appIcon {
                     Image(nsImage: icon)
@@ -1035,13 +1213,13 @@ struct AgentPlatformRowCard: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(snapshot.platform.rawValue.uppercased())
                             .font(.system(size: 13, weight: .black, design: .monospaced))
                             .foregroundColor(.white)
 
-                        Text(snapshot.state == .working ? "REDLINE" : (snapshot.state == .idle ? "ONLINE" : "PIT"))
+                        Text(snapshot.state == .working ? "ACTIVE" : (snapshot.state == .idle ? "ONLINE" : "OFFLINE"))
                             .font(.system(size: 8, weight: .black, design: .monospaced))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1.5)
@@ -1049,11 +1227,18 @@ struct AgentPlatformRowCard: View {
                             .foregroundColor(snapshot.state == .offline ? .white.opacity(0.7) : .black)
                     }
 
-                    SegmentedTelemetryBar(
-                        fraction: rpmFraction,
-                        segmentCount: 14,
-                        activeColor: snapshot.platform.accentColor
-                    )
+                    if let snippet = liveThreadSnippet, !snippet.isEmpty {
+                        Text(snippet)
+                            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.78, green: 0.92, blue: 1.0))
+                            .lineLimit(1)
+                    } else {
+                        SegmentedTelemetryBar(
+                            fraction: rpmFraction,
+                            segmentCount: 14,
+                            activeColor: snapshot.platform.accentColor
+                        )
+                    }
                 }
 
                 Spacer()

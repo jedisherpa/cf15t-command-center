@@ -129,6 +129,41 @@ struct RunningTaskItem: Identifiable {
     let platform: AgentPlatform?
 }
 
+// MARK: - Simplified Live App Display Digest (Messages / AI Threads / Content)
+
+enum DigestPresentationStyle: String, Equatable {
+    case messagingChat   // Signal, WhatsApp, Messages, Slack, Discord, Telegram
+    case aiAgentThread   // ChatGPT (Dot), Grok Bot, Claude, Antigravity, Codex, Ollama
+    case browserDocument // Google Chrome, Safari, Arc, Brave
+    case mediaNowPlaying // Music, Spotify, Podcasts
+    case systemInspector // Finder, Terminal, System Settings, Generic App
+
+    var badgeLabel: String {
+        switch self {
+        case .messagingChat: return "💬 LIVE MESSAGES"
+        case .aiAgentThread: return "🧠 RESPONSE THREAD"
+        case .browserDocument: return "🌐 ACTIVE PAGE"
+        case .mediaNowPlaying: return "🎵 NOW PLAYING"
+        case .systemInspector: return "📂 LIVE VIEW"
+        }
+    }
+}
+
+struct DigestFeedLine: Identifiable, Equatable {
+    let id: String
+    let speakerOrTag: String?   // e.g. "YOU", "DOT", "GROK", "MSG", "TOOL", "ANTIGRAVITY"
+    let text: String
+    let isIncomingOrAgent: Bool // true = left/agent/incoming, false = right/user prompt
+    let isHighlighted: Bool     // newest message or active streaming response
+}
+
+struct WindowLiveDigest: Equatable {
+    let style: DigestPresentationStyle
+    let contextTitle: String    // Active conversation partner, thread title, or page title
+    let statusBadge: String     // e.g. "4 RECENT MSGS", "LIVE THREAD", "ACTIVE"
+    let lines: [DigestFeedLine]
+}
+
 // MARK: - Monitored macOS Window
 
 struct MonitoredWindow: Identifiable, Equatable {
@@ -142,6 +177,7 @@ struct MonitoredWindow: Identifiable, Equatable {
     let platform: AgentPlatform?
     var appIcon: NSImage?
     var previewImage: NSImage?
+    var liveDigest: WindowLiveDigest? = nil
 
     var displayTitle: String {
         let trimmed = windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -151,7 +187,8 @@ struct MonitoredWindow: Identifiable, Equatable {
     static func == (lhs: MonitoredWindow, rhs: MonitoredWindow) -> Bool {
         lhs.id == rhs.id &&
         lhs.windowTitle == rhs.windowTitle &&
-        lhs.bounds == rhs.bounds
+        lhs.bounds == rhs.bounds &&
+        lhs.liveDigest == rhs.liveDigest
     }
 }
 

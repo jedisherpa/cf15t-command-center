@@ -96,7 +96,7 @@ final class WindowTilingEngine {
                 preview = captureWindowSnapshot(windowID: CGWindowID(windowNumber))
             }
 
-            let win = MonitoredWindow(
+            var win = MonitoredWindow(
                 id: CGWindowID(windowNumber),
                 ownerPID: ownerPID,
                 appName: ownerName,
@@ -108,7 +108,27 @@ final class WindowTilingEngine {
                 appIcon: appIcon,
                 previewImage: preview
             )
+            win.liveDigest = AppContentFeedExtractor.shared.extractLiveDigest(for: win)
             result.append(win)
+        }
+
+        // Ensure Antigravity's live session thread is always visible in the matrix if active
+        if !result.contains(where: { $0.platform == .antigravity }),
+           let agyDigest = AppContentFeedExtractor.shared.buildAntigravityLiveDigest(window: nil) {
+            let agyWin = MonitoredWindow(
+                id: 999_999,
+                ownerPID: ProcessInfo.processInfo.processIdentifier,
+                appName: "Antigravity",
+                bundleIdentifier: "com.google.antigravity",
+                windowTitle: "Live Agent Workspace & Thread",
+                bounds: CGRect(x: 0, y: 0, width: 1280, height: 800),
+                windowIndexInApp: 0,
+                platform: .antigravity,
+                appIcon: NSImage(systemSymbolName: "sparkles.rectangle.stack.fill", accessibilityDescription: "Antigravity"),
+                previewImage: nil,
+                liveDigest: agyDigest
+            )
+            result.insert(agyWin, at: min(2, result.count))
         }
 
         return result
