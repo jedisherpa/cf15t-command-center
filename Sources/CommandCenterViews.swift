@@ -4,16 +4,42 @@ import AppKit
 struct CommandCenterMainView: View {
     @ObservedObject var viewModel: CommandCenterViewModel
 
-    var body: some View {
-        VStack(spacing: 12) {
-            // 1. Top Voice Deck (Grok Bot <-> Dot + Mic Controls + CF15T Hardware Bar)
-            TopVoiceAndSystemBar(viewModel: viewModel)
+    private var totalSystemCPULoad: Double {
+        let agentSum = viewModel.agentSnapshots.reduce(0.0) { $0 + $1.cpuPercent }
+        let taskSum = viewModel.runningTasks.prefix(8).reduce(0.0) { $0 + $1.cpuPercent }
+        return max(agentSum, taskSum)
+    }
 
-            // 2. Main Split Workspace: Center-Stage + Border Window Tiler (Left 68%) | Agent & Task Monitor (Right 32%)
+    private var currentGearNumber: Int {
+        switch viewModel.tilingMode {
+        case .centerStageBorder: return 1
+        case .leftStagePerimeter: return 2
+        case .equalSimultaneousGrid: return 3
+        case .dualVoiceSplit: return 4
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            // 0. Top F1 / GT3 Shift-Light LED Rev Strip
+            ShiftLightRevStrip(
+                totalCPULoad: totalSystemCPULoad,
+                isAnyMicLive: viewModel.slotA.isMicEnabled || viewModel.slotB.isMicEnabled,
+                isTouchingScreen: viewModel.sisIsTouching
+            )
+
+            // 1. Supercar Instrument Cluster & Pit-Radio Switchboard (Grok Bot <-> Dot + Twin Gauges)
+            TopVoiceAndSystemBar(
+                viewModel: viewModel,
+                totalCPULoad: totalSystemCPULoad,
+                currentGear: currentGearNumber
+            )
+
+            // 2. Main Split Cockpit: Multi-Cam Viewport Matrix (Left 67%) | ECU Telemetry Tower (Right 33%)
             GeometryReader { geo in
                 let leftWidth = max(620, floor((geo.size.width - 12) * 0.67))
                 HStack(spacing: 12) {
-                    WindowTilingArenaPanel(viewModel: viewModel)
+                    WindowTilingArenaPanel(viewModel: viewModel, currentGear: currentGearNumber)
                         .frame(width: leftWidth)
 
                     AgentAndTasksSidePanel(viewModel: viewModel)
@@ -21,36 +47,45 @@ struct CommandCenterMainView: View {
                 }
             }
 
-            // 3. Bottom Touch Status & CF15T Quick-Control Strip
+            // 3. Bottom Diffuser & Pit-Lane Control Strip
             BottomStatusStrip(viewModel: viewModel)
         }
-        .padding(14)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(red: 0.05, green: 0.06, blue: 0.09),
-                    Color(red: 0.08, green: 0.10, blue: 0.15)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(CockpitCarbonBackground())
         .overlay(
+            // Live Multi-Touch Racing HUD Crosshair Reticle
             GeometryReader { fullGeo in
                 ZStack {
                     ForEach(viewModel.sisActiveContacts) { contact in
                         let cx = contact.normalizedX * fullGeo.size.width
                         let cy = contact.normalizedY * fullGeo.size.height
                         ZStack {
+                            HUDCornerBrackets(
+                                color: Color(red: 0.15, green: 1.0, blue: 0.62),
+                                lineWidth: 2.5,
+                                length: 16
+                            )
+                            .frame(width: 76, height: 76)
+
                             Circle()
-                                .stroke(Color(red: 0.20, green: 0.96, blue: 0.68), lineWidth: 3)
-                                .frame(width: 64, height: 64)
+                                .stroke(
+                                    Color(red: 1.0, green: 0.42, blue: 0.15),
+                                    style: StrokeStyle(lineWidth: 2.5, dash: [8, 5])
+                                )
+                                .frame(width: 54, height: 54)
+
                             Circle()
-                                .fill(Color(red: 1.0, green: 0.42, blue: 0.20).opacity(0.35))
-                                .frame(width: 44, height: 44)
-                            Text("#\(contact.id)")
-                                .font(.system(size: 11, weight: .black, design: .monospaced))
-                                .foregroundColor(.white)
+                                .fill(Color(red: 0.15, green: 1.0, blue: 0.62).opacity(0.28))
+                                .frame(width: 30, height: 30)
+
+                            Text(String(format: "T%d %.0f:%.0f", contact.id, contact.normalizedX * 100, contact.normalizedY * 100))
+                                .font(.system(size: 9, weight: .black, design: .monospaced))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.black.opacity(0.85))
+                                .foregroundColor(Color(red: 0.15, green: 1.0, blue: 0.62))
+                                .offset(y: 48)
                         }
                         .position(x: cx, y: cy)
                     }
@@ -64,18 +99,21 @@ struct CommandCenterMainView: View {
     }
 }
 
-// MARK: - 1. Top Voice & Mic Switchboard (Grok Bot <-> Dot)
+// MARK: - 1. Supercar Instrument Cluster & Pit-Radio Deck
 
 struct TopVoiceAndSystemBar: View {
     @ObservedObject var viewModel: CommandCenterViewModel
+    let totalCPULoad: Double
+    let currentGear: Int
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Slot A: Grok Bot
+        HStack(spacing: 10) {
+            // Left Wing: Channel 01 (Grok Bot)
             VoiceAssistantDeckCard(
+                channelTag: "CH-01 // PRIMARY",
                 slot: viewModel.slotA,
                 isActiveSlot: viewModel.activeVoiceSlotID == "slotA",
-                accentColor: Color(red: 1.0, green: 0.38, blue: 0.18),
+                accentColor: Color(red: 1.0, green: 0.36, blue: 0.14),
                 onActivate: {
                     viewModel.switchToVoiceSlot("slotA", toggleMicIfExclusive: false)
                 },
@@ -84,53 +122,19 @@ struct TopVoiceAndSystemBar: View {
                 }
             )
 
-            // Center Ping-Pong Switch Button (Grok Bot <-> Dot)
-            Button(action: {
-                viewModel.pingPongSwitchVoiceAssistants()
-            }) {
-                VStack(spacing: 6) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.left.arrow.right.circle.fill")
-                            .font(.system(size: 22, weight: .bold))
-                        Text("SWAP")
-                            .font(.system(size: 15, weight: .heavy, design: .rounded))
-                    }
-                    .foregroundColor(.white)
+            // Center Instrument Cluster: Twin Arc Gauges + Gear Readout + OVERTAKE A/B Paddle
+            CenterTelemetryCluster(
+                viewModel: viewModel,
+                totalCPULoad: totalCPULoad,
+                currentGear: currentGear
+            )
 
-                    Text("\(viewModel.slotA.displayName) ⇄ \(viewModel.slotB.displayName)")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.white.opacity(0.85))
-                        .lineLimit(1)
-
-                    Text(viewModel.exclusiveMicHandoff ? "Auto-Mic Handoff" : "Focus Switch")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(Color(red: 0.25, green: 0.90, blue: 0.68))
-                }
-                .padding(.horizontal, 16)
-                .frame(width: 165, height: 84)
-                .background(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.19, green: 0.24, blue: 0.36),
-                            Color(red: 0.13, green: 0.17, blue: 0.26)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color.white.opacity(0.24), lineWidth: 1.5)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-            }
-            .buttonStyle(.plain)
-
-            // Slot B: Dot (or Configurable Secondary Voice)
+            // Right Wing: Channel 02 (Dot)
             VoiceAssistantDeckCard(
+                channelTag: "CH-02 // CO-PILOT",
                 slot: viewModel.slotB,
                 isActiveSlot: viewModel.activeVoiceSlotID == "slotB",
-                accentColor: Color(red: 0.20, green: 0.86, blue: 0.65),
+                accentColor: Color(red: 0.12, green: 0.96, blue: 0.68),
                 onActivate: {
                     viewModel.switchToVoiceSlot("slotB", toggleMicIfExclusive: false)
                 },
@@ -139,15 +143,100 @@ struct TopVoiceAndSystemBar: View {
                 }
             )
 
-            // System CoreAudio Master Mic & CF15T Touch Guard Box
+            // Far-Right ECU Switch Box (Hardware Mic Kill + Ignition Awake + Traction Snap)
             SystemMicAndTouchGuardBox(viewModel: viewModel)
-                .frame(width: 340)
+                .frame(width: 335)
         }
-        .frame(height: 84)
+        .frame(height: 92)
+    }
+}
+
+struct CenterTelemetryCluster: View {
+    @ObservedObject var viewModel: CommandCenterViewModel
+    let totalCPULoad: Double
+    let currentGear: Int
+
+    var body: some View {
+        HStack(spacing: 10) {
+            // Left Tachometer: AI Engine RPM
+            CockpitArcGaugeView(
+                title: "ECU LOAD",
+                valueText: String(format: "%.0f", min(99, totalCPULoad)),
+                unitText: "% RPM",
+                progress: min(1.0, max(0.08, totalCPULoad / 80.0)),
+                accentColor: Color(red: 0.18, green: 0.85, blue: 1.0),
+                redlineColor: Color(red: 1.0, green: 0.25, blue: 0.20)
+            )
+
+            // Center Overtake / Comms Swap Button + Digital Gear Indicator
+            Button(action: {
+                viewModel.pingPongSwitchVoiceAssistants()
+            }) {
+                VStack(spacing: 3) {
+                    HStack(spacing: 5) {
+                        Text("GEAR")
+                            .font(.system(size: 9, weight: .black, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.6))
+                        Text("\(currentGear)")
+                            .font(.system(size: 16, weight: .black, design: .monospaced))
+                            .foregroundColor(Color(red: 1.0, green: 0.80, blue: 0.15))
+                    }
+
+                    HStack(spacing: 5) {
+                        Image(systemName: "bolt.horizontal.circle.fill")
+                            .font(.system(size: 16, weight: .black))
+                        Text("OVERTAKE")
+                            .font(.system(size: 13, weight: .black, design: .monospaced))
+                    }
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 1.0, green: 0.78, blue: 0.15),
+                                Color(red: 1.0, green: 0.45, blue: 0.12)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .clipShape(CockpitChamferShape(topLeftCut: 7, topRightCut: 7, bottomRightCut: 7, bottomLeftCut: 7))
+
+                    Text("\(viewModel.slotA.displayName.uppercased()) ⇄ \(viewModel.slotB.displayName.uppercased())")
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                        .foregroundColor(Color(red: 0.20, green: 0.95, blue: 0.70))
+                        .lineLimit(1)
+                }
+                .frame(width: 142, height: 78)
+            }
+            .buttonStyle(.plain)
+
+            // Right Boost Gauge: Mic Gain PSI
+            CockpitArcGaugeView(
+                title: "MIC GAIN",
+                valueText: viewModel.systemMicMuted ? "MUTE" : "\(Int(viewModel.systemMicVolume * 100))",
+                unitText: viewModel.systemMicMuted ? "0 PSI" : "% BOOST",
+                progress: viewModel.systemMicMuted ? 0.0 : Double(viewModel.systemMicVolume),
+                accentColor: Color(red: 0.15, green: 0.96, blue: 0.62),
+                redlineColor: Color(red: 1.0, green: 0.65, blue: 0.12)
+            )
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 92)
+        .background(
+            Color(red: 0.07, green: 0.09, blue: 0.14)
+        )
+        .clipShape(CockpitChamferShape(topLeftCut: 16, topRightCut: 16, bottomRightCut: 16, bottomLeftCut: 16))
+        .overlay(
+            CockpitChamferShape(topLeftCut: 16, topRightCut: 16, bottomRightCut: 16, bottomLeftCut: 16)
+                .stroke(Color(red: 0.25, green: 0.82, blue: 1.0).opacity(0.45), lineWidth: 1.5)
+        )
     }
 }
 
 struct VoiceAssistantDeckCard: View {
+    let channelTag: String
     let slot: VoiceAssistantConfig
     let isActiveSlot: Bool
     let accentColor: Color
@@ -155,87 +244,93 @@ struct VoiceAssistantDeckCard: View {
     let onToggleMic: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            // Left button: Activate / Focus Assistant
+        let shape = CockpitChamferShape(topLeftCut: 14, topRightCut: 14, bottomRightCut: 14, bottomLeftCut: 14)
+
+        HStack(spacing: 8) {
+            // Left Racing Stripe
+            Rectangle()
+                .fill(accentColor)
+                .frame(width: 5)
+                .shadow(color: accentColor, radius: 6)
+
+            // Main Comms Selector Button
             Button(action: onActivate) {
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(accentColor.opacity(isActiveSlot ? 0.28 : 0.14))
-                            .frame(width: 46, height: 46)
-                        Image(systemName: slot.isMicEnabled ? "waveform.circle.fill" : "person.wave.2.fill")
-                            .font(.system(size: 22, weight: .bold))
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(channelTag)
+                            .font(.system(size: 9, weight: .black, design: .monospaced))
                             .foregroundColor(accentColor)
+
+                        if isActiveSlot {
+                            Text("ON-AIR STAGE")
+                                .font(.system(size: 8, weight: .black, design: .monospaced))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(accentColor)
+                                .foregroundColor(.black)
+                        }
                     }
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(slot.displayName)
-                                .font(.system(size: 18, weight: .heavy, design: .rounded))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                            if isActiveSlot {
-                                Text("ACTIVE")
-                                    .font(.system(size: 9, weight: .black))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(accentColor)
-                                    .foregroundColor(.black)
-                                    .clipShape(Capsule())
-                            }
-                        }
-                        Text("Tap to Focus (\(slot.targetAppName))")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white.opacity(0.65))
+                    Text(slot.displayName.uppercased())
+                        .font(.system(size: 20, weight: .black, design: .monospaced))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    HStack(spacing: 6) {
+                        SegmentedTelemetryBar(
+                            fraction: slot.isMicEnabled ? 0.92 : (isActiveSlot ? 0.45 : 0.15),
+                            segmentCount: 8,
+                            activeColor: accentColor
+                        )
+                        Text(slot.targetAppName.uppercased())
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.55))
                             .lineLimit(1)
                     }
-                    Spacer(minLength: 4)
                 }
-                .padding(.leading, 12)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.leading, 4)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // Right button: Big Tactile MIC ON / OFF Toggle
+            // Right Arcade PTT / Mic Trigger
             Button(action: onToggleMic) {
                 VStack(spacing: 4) {
-                    Image(systemName: slot.isMicEnabled ? "mic.fill" : "mic.slash.fill")
-                        .font(.system(size: 22, weight: .bold))
+                    Image(systemName: slot.isMicEnabled ? "waveform.badge.mic" : "mic.slash.fill")
+                        .font(.system(size: 22, weight: .black))
                         .foregroundColor(slot.isMicEnabled ? .black : .white)
-                    Text(slot.isMicEnabled ? "MIC ON" : "MUTED")
-                        .font(.system(size: 11, weight: .black, design: .rounded))
-                        .foregroundColor(slot.isMicEnabled ? .black : .white.opacity(0.85))
+
+                    Text(slot.isMicEnabled ? "TX LIVE" : "RADIO OFF")
+                        .font(.system(size: 10, weight: .black, design: .monospaced))
+                        .foregroundColor(slot.isMicEnabled ? .black : .white.opacity(0.9))
                 }
-                .frame(width: 96, height: 68)
+                .frame(width: 92, height: 74)
                 .background(
                     slot.isMicEnabled
-                        ? Color(red: 0.20, green: 0.94, blue: 0.56)
-                        : Color(red: 0.85, green: 0.24, blue: 0.28).opacity(0.35)
+                        ? Color(red: 0.12, green: 1.0, blue: 0.58)
+                        : Color(red: 0.92, green: 0.18, blue: 0.24).opacity(0.32)
                 )
+                .clipShape(CockpitChamferShape(topLeftCut: 10, topRightCut: 10, bottomRightCut: 10, bottomLeftCut: 10))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 11)
+                    CockpitChamferShape(topLeftCut: 10, topRightCut: 10, bottomRightCut: 10, bottomLeftCut: 10)
                         .stroke(
-                            slot.isMicEnabled
-                                ? Color.white.opacity(0.8)
-                                : Color(red: 0.95, green: 0.35, blue: 0.38).opacity(0.6),
+                            slot.isMicEnabled ? Color.white : Color(red: 1.0, green: 0.32, blue: 0.36).opacity(0.75),
                             lineWidth: 1.5
                         )
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 11))
+                .shadow(color: slot.isMicEnabled ? Color(red: 0.12, green: 1.0, blue: 0.58).opacity(0.65) : .clear, radius: 8)
                 .padding(.trailing, 8)
             }
             .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(red: 0.11, green: 0.14, blue: 0.20))
-        )
+        .background(Color(red: 0.08, green: 0.10, blue: 0.16))
+        .clipShape(shape)
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(isActiveSlot ? accentColor : Color.white.opacity(0.12), lineWidth: isActiveSlot ? 2.2 : 1.0)
+            shape.stroke(isActiveSlot ? accentColor : Color.white.opacity(0.16), lineWidth: isActiveSlot ? 2.4 : 1.0)
         )
+        .shadow(color: isActiveSlot ? accentColor.opacity(0.35) : .clear, radius: 8)
     }
 }
 
@@ -243,35 +338,41 @@ struct SystemMicAndTouchGuardBox: View {
     @ObservedObject var viewModel: CommandCenterViewModel
 
     var body: some View {
-        HStack(spacing: 10) {
-            // Master CoreAudio Hardware Mute Button
+        let shape = CockpitChamferShape(topLeftCut: 14, topRightCut: 14, bottomRightCut: 14, bottomLeftCut: 14)
+
+        HStack(spacing: 8) {
+            // Hardware Master Kill Switch
             Button(action: {
                 viewModel.toggleSystemMasterMicMute()
             }) {
-                VStack(spacing: 4) {
-                    Image(systemName: viewModel.systemMicMuted ? "mic.slash.circle.fill" : "mic.circle.fill")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(viewModel.systemMicMuted ? Color(red: 1.0, green: 0.36, blue: 0.38) : Color(red: 0.25, green: 0.92, blue: 0.60))
-                    Text(viewModel.systemMicMuted ? "HW MUTE" : "HW LIVE")
-                        .font(.system(size: 10, weight: .black))
+                VStack(spacing: 3) {
+                    Image(systemName: viewModel.systemMicMuted ? "xmark.octagon.fill" : "bolt.shield.fill")
+                        .font(.system(size: 22, weight: .black))
+                        .foregroundColor(viewModel.systemMicMuted ? Color(red: 1.0, green: 0.28, blue: 0.28) : Color(red: 0.15, green: 0.98, blue: 0.60))
+                    Text(viewModel.systemMicMuted ? "KILL MIC" : "ARMED")
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
                         .foregroundColor(.white)
                 }
-                .frame(width: 78, height: 68)
-                .background(Color.white.opacity(0.07))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .frame(width: 72, height: 74)
+                .background(Color.black.opacity(0.45))
+                .clipShape(CockpitChamferShape(topLeftCut: 8, topRightCut: 8, bottomRightCut: 8, bottomLeftCut: 8))
+                .overlay(
+                    CockpitChamferShape(topLeftCut: 8, topRightCut: 8, bottomRightCut: 8, bottomLeftCut: 8)
+                        .stroke(viewModel.systemMicMuted ? Color.red.opacity(0.7) : Color(red: 0.15, green: 0.98, blue: 0.60).opacity(0.6), lineWidth: 1.5)
+                )
             }
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(viewModel.audioInputDeviceName)
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.white.opacity(0.85))
+                    Text("GAIN // \(viewModel.audioInputDeviceName.uppercased())")
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.75))
                         .lineLimit(1)
                     Spacer()
                     Text("\(Int(viewModel.systemMicVolume * 100))%")
-                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
-                        .foregroundColor(Color(red: 0.25, green: 0.92, blue: 0.60))
+                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .foregroundColor(Color(red: 0.15, green: 0.98, blue: 0.60))
                 }
 
                 Slider(
@@ -281,53 +382,52 @@ struct SystemMicAndTouchGuardBox: View {
                     ),
                     in: 0...1
                 )
-                .tint(Color(red: 0.25, green: 0.92, blue: 0.60))
+                .tint(Color(red: 0.15, green: 0.98, blue: 0.60))
 
-                HStack(spacing: 6) {
+                // 3 Dashboard Toggle Switches
+                HStack(spacing: 5) {
                     Button(action: { viewModel.isShowingVoiceSlotEditor = true }) {
-                        Label("A/B Slots", systemImage: "slider.horizontal.3")
-                            .font(.system(size: 11, weight: .bold))
+                        Text("TUNE A/B")
+                            .font(.system(size: 9, weight: .black, design: .monospaced))
                             .foregroundColor(.white)
                             .padding(.horizontal, 7)
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 5)
                             .background(Color.white.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     .buttonStyle(.plain)
 
                     Button(action: { viewModel.keepAwakeEnabled.toggle() }) {
-                        Label(
-                            viewModel.keepAwakeEnabled ? "Awake ON" : "Awake OFF",
-                            systemImage: viewModel.keepAwakeEnabled ? "cup.and.saucer.fill" : "moon.zzz.fill"
-                        )
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(viewModel.keepAwakeEnabled ? .black : .white.opacity(0.8))
+                        HStack(spacing: 3) {
+                            Image(systemName: "flame.fill")
+                                .font(.system(size: 9))
+                            Text(viewModel.keepAwakeEnabled ? "IGNITION ON" : "SLEEP OK")
+                                .font(.system(size: 9, weight: .black, design: .monospaced))
+                        }
+                        .foregroundColor(viewModel.keepAwakeEnabled ? .black : .white.opacity(0.75))
                         .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 5)
                         .background(
                             viewModel.keepAwakeEnabled
-                                ? Color(red: 0.98, green: 0.78, blue: 0.22)
+                                ? Color(red: 1.0, green: 0.78, blue: 0.15)
                                 : Color.white.opacity(0.10)
                         )
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     .buttonStyle(.plain)
 
                     Button(action: { viewModel.cursorSnapbackEnabled.toggle() }) {
-                        Label(
-                            viewModel.cursorSnapbackEnabled ? "Snap ON" : "Snap OFF",
-                            systemImage: viewModel.cursorSnapbackEnabled ? "cursorarrow.motionlines" : "cursorarrow"
-                        )
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(viewModel.cursorSnapbackEnabled ? .black : .white.opacity(0.8))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(
-                            viewModel.cursorSnapbackEnabled
-                                ? Color(red: 0.35, green: 0.78, blue: 1.0)
-                                : Color.white.opacity(0.10)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        Text(viewModel.cursorSnapbackEnabled ? "TCS: SNAP" : "TCS: OFF")
+                            .font(.system(size: 9, weight: .black, design: .monospaced))
+                            .foregroundColor(viewModel.cursorSnapbackEnabled ? .black : .white.opacity(0.75))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 5)
+                            .background(
+                                viewModel.cursorSnapbackEnabled
+                                    ? Color(red: 0.20, green: 0.86, blue: 1.0)
+                                    : Color.white.opacity(0.10)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     .buttonStyle(.plain)
                 }
@@ -335,96 +435,116 @@ struct SystemMicAndTouchGuardBox: View {
         }
         .padding(8)
         .frame(maxHeight: .infinity)
-        .background(Color(red: 0.11, green: 0.14, blue: 0.20))
+        .background(Color(red: 0.08, green: 0.10, blue: 0.16))
+        .clipShape(shape)
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            shape.stroke(Color.white.opacity(0.16), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }
 
-// MARK: - 2. Center Stage + Perimeter Border Window Tiling Arena
+// MARK: - 2. Multi-Cam Viewport Matrix (Center Stage + Perimeter Border)
 
 struct WindowTilingArenaPanel: View {
     @ObservedObject var viewModel: CommandCenterViewModel
+    let currentGear: Int
 
     var body: some View {
+        let panelShape = CockpitChamferShape(topLeftCut: 18, topRightCut: 18, bottomRightCut: 18, bottomLeftCut: 18)
+
         VStack(spacing: 10) {
-            // Arena Header & Layout Controls
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "uiwindow.split.2x1")
-                            .foregroundColor(Color(red: 0.35, green: 0.78, blue: 1.0))
-                        Text("CENTER STAGE + BORDER WINDOW MATRIX")
-                            .font(.system(size: 13, weight: .black, design: .rounded))
+            // Sequential Gearbox Bar & Nitro Tile Trigger
+            HStack(spacing: 6) {
+                HStack(spacing: 6) {
+                    Text("G\(currentGear)")
+                        .font(.system(size: 16, weight: .black, design: .monospaced))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color(red: 1.0, green: 0.38, blue: 0.14))
+                        .foregroundColor(.black)
+                        .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("VIEWPORT TELEMETRY MATRIX // CENTER STAGE + PERIMETER")
+                            .font(.system(size: 11, weight: .black, design: .monospaced))
                             .foregroundColor(.white)
+                        Text("TOUCH ANY PERIMETER CAMERA FEED TO LOCK IT INTO MAIN STAGE")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.20, green: 0.86, blue: 1.0))
                     }
-                    Text("Press any border window to enlarge it Center Stage while keeping the rest around the border")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.6))
                 }
 
                 Spacer()
 
-                // Layout mode buttons
-                ForEach(TilingLayoutMode.allCases) { mode in
+                // 4 Gear Layout Paddles
+                ForEach(Array(TilingLayoutMode.allCases.enumerated()), id: \.element.id) { idx, mode in
+                    let isSelected = (viewModel.tilingMode == mode)
                     Button(action: {
                         viewModel.tilingMode = mode
                         if viewModel.autoTileRealWindowsOnTap {
-                            viewModel.applyRealScreenTilingNow()
+                            viewModel.applyRealScreenTilingNow(promptIfUntrusted: false)
                         }
                     }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: mode.iconName)
-                                .font(.system(size: 12, weight: .bold))
-                            Text(mode.shortLabel)
-                                .font(.system(size: 11, weight: .bold))
+                        HStack(spacing: 4) {
+                            Text("G\(idx + 1)")
+                                .font(.system(size: 10, weight: .black, design: .monospaced))
+                                .foregroundColor(isSelected ? .black : Color(red: 1.0, green: 0.78, blue: 0.15))
+                            Text(mode.shortLabel.uppercased())
+                                .font(.system(size: 10, weight: .black, design: .monospaced))
+                                .foregroundColor(isSelected ? .black : .white)
                         }
-                        .foregroundColor(viewModel.tilingMode == mode ? .black : .white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 7)
                         .background(
-                            viewModel.tilingMode == mode
-                                ? Color(red: 0.35, green: 0.78, blue: 1.0)
+                            isSelected
+                                ? Color(red: 0.20, green: 0.88, blue: 1.0)
                                 : Color.white.opacity(0.08)
                         )
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .clipShape(CockpitChamferShape(topLeftCut: 6, topRightCut: 6, bottomRightCut: 6, bottomLeftCut: 6))
                     }
                     .buttonStyle(.plain)
                 }
 
-                // Physical macOS Tiling Trigger Button
+                // NITRO: Physical macOS Screen Tile Trigger
                 Button(action: {
-                    viewModel.applyRealScreenTilingNow()
+                    viewModel.applyRealScreenTilingNow(promptIfUntrusted: true)
                 }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "macwindow.on.rectangle")
-                            .font(.system(size: 12, weight: .bold))
-                        Text("Tile Screen Now")
-                            .font(.system(size: 12, weight: .heavy))
+                    HStack(spacing: 4) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 11, weight: .black))
+                        Text("ENGAGE TILE")
+                            .font(.system(size: 10, weight: .black, design: .monospaced))
                     }
                     .foregroundColor(.black)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color(red: 0.20, green: 0.90, blue: 0.62))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
+                    .background(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.15, green: 1.0, blue: 0.58),
+                                Color(red: 0.10, green: 0.82, blue: 0.95)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .clipShape(CockpitChamferShape(topLeftCut: 6, topRightCut: 6, bottomRightCut: 6, bottomLeftCut: 6))
+                    .shadow(color: Color(red: 0.15, green: 1.0, blue: 0.58).opacity(0.5), radius: 6)
                 }
                 .buttonStyle(.plain)
 
                 Button(action: {
                     viewModel.restoreOriginalWindowPositions()
                 }) {
-                    Image(systemName: "arrow.uturn.backward.circle.fill")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.white.opacity(0.8))
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 12, weight: .black))
+                        .foregroundColor(.white)
                         .padding(7)
-                        .background(Color.white.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .background(Color.white.opacity(0.10))
+                        .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
                 }
                 .buttonStyle(.plain)
-                .help("Restore Original Window Sizes")
+                .help("Restore Original Window Positions")
             }
 
             // Interactive Center Stage + Perimeter Border Canvas
@@ -436,12 +556,11 @@ struct WindowTilingArenaPanel: View {
             }
         }
         .padding(12)
-        .background(Color(red: 0.09, green: 0.11, blue: 0.16))
+        .background(Color(red: 0.06, green: 0.08, blue: 0.13).opacity(0.92))
+        .clipShape(panelShape)
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.11), lineWidth: 1)
+            panelShape.stroke(Color(red: 0.20, green: 0.82, blue: 1.0).opacity(0.28), lineWidth: 1.5)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -453,32 +572,27 @@ struct CenterStagePerimeterCanvas: View {
         let windows = viewModel.visibleTiledWindows
         if windows.isEmpty {
             VStack(spacing: 12) {
-                Image(systemName: "macwindow.badge.plus")
-                    .font(.system(size: 40))
-                    .foregroundColor(.white.opacity(0.35))
-                Text("No External Application Windows Open")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.white.opacity(0.8))
-                Text("Open Grok Bot, Claude, Codex, Chrome, or any macOS app — or tap Refresh.")
-                    .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.5))
+                Image(systemName: "car.top.radiowaves.rear.right.and.rear.left.fill")
+                    .font(.system(size: 42))
+                    .foregroundColor(Color(red: 0.20, green: 0.86, blue: 1.0))
+                Text("NO TELEMETRY VIEWPORTS DETECTED")
+                    .font(.system(size: 16, weight: .black, design: .monospaced))
+                    .foregroundColor(.white)
                 Button(action: {
                     viewModel.excludedWindowIDs.removeAll()
                     viewModel.refreshAll(captureImages: true)
                 }) {
-                    Text("Reset Filter & Scan Windows")
-                        .font(.system(size: 13, weight: .bold))
+                    Text("SCAN OPEN WINDOWS")
+                        .font(.system(size: 12, weight: .black, design: .monospaced))
                         .foregroundColor(.black)
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 18)
                         .padding(.vertical, 10)
-                        .background(Color(red: 0.35, green: 0.78, blue: 1.0))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .background(Color(red: 0.20, green: 0.88, blue: 1.0))
+                        .clipShape(CockpitChamferShape(topLeftCut: 8, topRightCut: 8, bottomRightCut: 8, bottomLeftCut: 8))
                 }
                 .buttonStyle(.plain)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black.opacity(0.25))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
         } else {
             let orderedWindows: [MonitoredWindow] = {
                 if let stage = viewModel.currentStageWindow {
@@ -516,7 +630,7 @@ struct CenterStagePerimeterCanvas: View {
                         )
                         .frame(width: max(80, rect.width), height: max(60, rect.height))
                         .position(x: rect.midX, y: rect.midY)
-                        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: rect)
+                        .animation(.spring(response: 0.32, dampingFraction: 0.80), value: rect)
                     }
                 }
             }
@@ -539,29 +653,30 @@ struct InteractiveWindowTileCard: View {
         }
         let lower = window.appName.lowercased()
         if lower.contains("chrome") || lower.contains("safari") {
-            return Color(red: 0.25, green: 0.62, blue: 1.0)
+            return Color(red: 0.20, green: 0.72, blue: 1.0)
         } else if lower.contains("whatsapp") {
-            return Color(red: 0.18, green: 0.85, blue: 0.46)
+            return Color(red: 0.15, green: 0.95, blue: 0.52)
         } else if lower.contains("signal") {
-            return Color(red: 0.35, green: 0.48, blue: 0.98)
+            return Color(red: 0.38, green: 0.54, blue: 1.0)
         } else if lower.contains("music") || lower.contains("spotify") {
-            return Color(red: 0.96, green: 0.32, blue: 0.55)
+            return Color(red: 1.0, green: 0.28, blue: 0.58)
         } else if lower.contains("settings") {
-            return Color(red: 0.95, green: 0.72, blue: 0.22)
+            return Color(red: 1.0, green: 0.78, blue: 0.18)
         } else if lower.contains("finder") {
-            return Color(red: 0.28, green: 0.78, blue: 0.98)
-        } else if lower.contains("preview") || lower.contains("textedit") {
-            return Color(red: 0.65, green: 0.52, blue: 0.96)
+            return Color(red: 0.25, green: 0.85, blue: 1.0)
         }
-        return Color(red: 0.35, green: 0.78, blue: 1.0)
+        return Color(red: 0.28, green: 0.82, blue: 1.0)
     }
 
     var body: some View {
         let accent = appThemeColor
+        let cut: CGFloat = isCenterStage ? 18 : 11
+        let tileShape = CockpitChamferShape(topLeftCut: cut, topRightCut: cut, bottomRightCut: cut, bottomLeftCut: cut)
+        let camLabel = isCenterStage ? "CAM-01 //APEX STAGE" : String(format: "CAM-%02d // PERIM", tileIndex + 1)
 
         Button(action: onTapPromote) {
             ZStack(alignment: .bottomLeading) {
-                // Background Live Snapshot or Distinct Color-Coded App Card
+                // Background Live Snapshot or Racing Telemetry Viewport
                 GeometryReader { cardGeo in
                     if let preview = window.previewImage,
                        preview.size.width > 4,
@@ -573,205 +688,209 @@ struct InteractiveWindowTileCard: View {
                             .aspectRatio(contentMode: .fill)
                             .frame(width: cardGeo.size.width, height: cardGeo.size.height)
                             .clipped()
-                            .overlay(Color.black.opacity(isCenterStage ? 0.08 : 0.26))
+                            .overlay(Color.black.opacity(isCenterStage ? 0.08 : 0.28))
                     } else {
                         ZStack {
                             LinearGradient(
                                 colors: [
-                                    accent.opacity(isCenterStage ? 0.34 : 0.20),
-                                    Color(red: 0.07, green: 0.09, blue: 0.14)
+                                    accent.opacity(isCenterStage ? 0.38 : 0.22),
+                                    Color(red: 0.05, green: 0.07, blue: 0.11)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
 
-                            VStack(spacing: isCenterStage ? 12 : 6) {
+                            // Center Reticle & App Emblem
+                            VStack(spacing: isCenterStage ? 10 : 4) {
                                 if let icon = window.appIcon {
                                     Image(nsImage: icon)
                                         .resizable()
-                                        .frame(width: isCenterStage ? 84 : 44, height: isCenterStage ? 84 : 44)
-                                        .shadow(color: .black.opacity(0.45), radius: 8, x: 0, y: 4)
+                                        .frame(width: isCenterStage ? 86 : 40, height: isCenterStage ? 86 : 40)
+                                        .shadow(color: accent.opacity(0.6), radius: 10)
                                 }
-                                Text(window.appName)
-                                    .font(.system(size: isCenterStage ? 26 : 14, weight: .black, design: .rounded))
+
+                                Text(window.appName.uppercased())
+                                    .font(.system(size: isCenterStage ? 26 : 13, weight: .black, design: .monospaced))
                                     .foregroundColor(.white)
                                     .lineLimit(1)
 
                                 if isCenterStage {
-                                    Text("ACTIVE STAGE WINDOW — TAP ANY BORDER TILE TO SWAP")
-                                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                                        .foregroundColor(Color(red: 0.25, green: 0.96, blue: 0.68))
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 5)
-                                        .background(Color.black.opacity(0.45))
-                                        .clipShape(Capsule())
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "scope")
+                                        Text("LOCKED IN MAIN STAGE // TAP ANY BORDER FEED TO OVERTAKE")
+                                            .font(.system(size: 11, weight: .black, design: .monospaced))
+                                    }
+                                    .foregroundColor(Color(red: 0.15, green: 1.0, blue: 0.62))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 5)
+                                    .background(Color.black.opacity(0.65))
+                                    .clipShape(CockpitChamferShape(topLeftCut: 6, topRightCut: 6, bottomRightCut: 6, bottomLeftCut: 6))
                                 }
                             }
-                            .padding(.top, 18)
+                            .padding(.top, 14)
                         }
                     }
                 }
 
-                // Top Header Overlay (App Icon, Name, Stage Badge, Quick Actions)
+                // HUD Corner Brackets inside Center Stage
+                if isCenterStage {
+                    HUDCornerBrackets(
+                        color: Color(red: 0.15, green: 1.0, blue: 0.62),
+                        lineWidth: 3.0,
+                        length: 28
+                    )
+                    .padding(8)
+                }
+
+                // Top & Bottom Telemetry Overlay Bars
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 8) {
-                        if let icon = window.appIcon {
-                            Image(nsImage: icon)
-                                .resizable()
-                                .frame(width: isCenterStage ? 26 : 20, height: isCenterStage ? 26 : 20)
-                        }
+                    // Top Telemetry Strip
+                    HStack(spacing: 6) {
+                        Text(camLabel)
+                            .font(.system(size: isCenterStage ? 10 : 8, weight: .black, design: .monospaced))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2.5)
+                            .background(isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62) : accent)
+                            .foregroundColor(.black)
 
-                        VStack(alignment: .leading, spacing: 1) {
-                            HStack(spacing: 6) {
-                                Text(window.appName)
-                                    .font(.system(size: isCenterStage ? 14 : 12, weight: .heavy, design: .rounded))
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
+                        Text(window.appName.uppercased())
+                            .font(.system(size: isCenterStage ? 13 : 10, weight: .black, design: .monospaced))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
 
-                                if isCenterStage {
-                                    Text("STAGE (EXPANDED)")
-                                        .font(.system(size: 9, weight: .black))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color(red: 0.20, green: 0.92, blue: 0.60))
-                                        .foregroundColor(.black)
-                                        .clipShape(Capsule())
-                                } else {
-                                    Text("TAP TO EXPAND")
-                                        .font(.system(size: 8, weight: .black))
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 2)
-                                        .background(Color.white.opacity(0.18))
-                                        .foregroundColor(.white)
-                                        .clipShape(Capsule())
-                                }
-                            }
-
-                            Text(window.displayTitle)
-                                .font(.system(size: isCenterStage ? 12 : 10, weight: .medium))
-                                .foregroundColor(.white.opacity(0.80))
-                                .lineLimit(1)
-                        }
-
-                        Spacer(minLength: 4)
+                        Spacer(minLength: 2)
 
                         if isCenterStage {
                             Button(action: onFocusOnly) {
-                                Label("Bring to Front", systemImage: "arrow.up.forward.app.fill")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(accent)
-                                    .foregroundColor(.black)
-                                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                                HStack(spacing: 4) {
+                                    Image(systemName: "bolt.fill")
+                                    Text("BOOST TO FRONT")
+                                }
+                                .font(.system(size: 10, weight: .black, design: .monospaced))
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
+                                .background(Color(red: 1.0, green: 0.78, blue: 0.15))
+                                .foregroundColor(.black)
+                                .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
                             }
                             .buttonStyle(.plain)
                         }
 
                         Button(action: onExclude) {
-                            Image(systemName: "eye.slash.fill")
-                                .font(.system(size: 11, weight: .bold))
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .black))
                                 .foregroundColor(.white.opacity(0.75))
-                                .padding(6)
-                                .background(Color.black.opacity(0.45))
+                                .padding(5)
+                                .background(Color.black.opacity(0.55))
                                 .clipShape(Circle())
                         }
                         .buttonStyle(.plain)
-                        .help("Hide window from tiling grid")
                     }
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Color.black.opacity(0.72))
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.78))
 
                     Spacer()
 
-                    // Bottom Metadata Pill
+                    // Bottom Telemetry Readout
                     HStack {
                         if let plat = window.platform {
-                            HStack(spacing: 4) {
-                                Image(systemName: plat.symbolName)
-                                    .font(.system(size: 10, weight: .bold))
-                                Text(plat.rawValue)
-                                    .font(.system(size: 10, weight: .bold))
-                            }
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(plat.accentColor.opacity(0.9))
-                            .foregroundColor(.black)
-                            .clipShape(Capsule())
+                            Text("AI // \(plat.rawValue.uppercased())")
+                                .font(.system(size: 9, weight: .black, design: .monospaced))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(plat.accentColor)
+                                .foregroundColor(.black)
+                        } else {
+                            Text("PID \(window.ownerPID)")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.65))
                         }
 
                         Spacer()
 
-                        Text("\(Int(window.bounds.width))×\(Int(window.bounds.height))")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        Text("X:\(Int(window.bounds.origin.x)) Y:\(Int(window.bounds.origin.y)) [\(Int(window.bounds.width))×\(Int(window.bounds.height))]")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.black.opacity(0.65))
-                            .foregroundColor(.white.opacity(0.75))
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                            .background(Color.black.opacity(0.72))
+                            .foregroundColor(Color(red: 0.25, green: 0.88, blue: 1.0))
                     }
-                    .padding(8)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.black.opacity(0.55))
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: isCenterStage ? 14 : 11))
+            .clipShape(tileShape)
             .overlay(
-                RoundedRectangle(cornerRadius: isCenterStage ? 14 : 11)
-                    .stroke(
-                        isCenterStage
-                            ? Color(red: 0.20, green: 0.92, blue: 0.60)
-                            : accent.opacity(0.55),
-                        lineWidth: isCenterStage ? 3.0 : 1.4
-                    )
+                tileShape.stroke(
+                    isCenterStage
+                        ? Color(red: 0.15, green: 1.0, blue: 0.62)
+                        : accent.opacity(0.65),
+                    lineWidth: isCenterStage ? 3.0 : 1.4
+                )
             )
-            .shadow(color: Color.black.opacity(0.35), radius: isCenterStage ? 10 : 4, x: 0, y: 3)
+            .shadow(
+                color: isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62).opacity(0.35) : .black.opacity(0.4),
+                radius: isCenterStage ? 12 : 4
+            )
         }
         .buttonStyle(.plain)
     }
 }
 
-// MARK: - 3. Right Side Panel: Multi-Platform AI Agent Monitor & Running Tasks
+// MARK: - 3. Right Side Tower: ECU Engine Diagnostics & Pit Crew Agents
 
 struct AgentAndTasksSidePanel: View {
     @ObservedObject var viewModel: CommandCenterViewModel
-    @State private var selectedTab: Int = 0 // 0 = All AI Agents, 1 = Running Tasks
+    @State private var selectedTab: Int = 0 // 0 = AI Engines, 1 = ECU Tasks
 
     var body: some View {
+        let panelShape = CockpitChamferShape(topLeftCut: 18, topRightCut: 18, bottomRightCut: 18, bottomLeftCut: 18)
+
         VStack(spacing: 10) {
-            // Segmented Touch Header
+            // Motorsport Paddle Tabs
             HStack(spacing: 8) {
                 Button(action: { selectedTab = 0 }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "cpu.fill")
-                        Text("AI Agent Platforms (\(viewModel.agentSnapshots.filter { $0.state != .offline }.count) Live)")
-                            .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    HStack(spacing: 5) {
+                        Image(systemName: "gauge.with.dots.needle.67percent")
+                        Text("AI ENGINES (\(viewModel.agentSnapshots.filter { $0.state != .offline }.count) LIVE)")
+                            .font(.system(size: 11, weight: .black, design: .monospaced))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(selectedTab == 0 ? Color(red: 0.35, green: 0.78, blue: 1.0) : Color.white.opacity(0.08))
+                    .padding(.vertical, 9)
+                    .background(
+                        selectedTab == 0
+                            ? Color(red: 1.0, green: 0.42, blue: 0.14)
+                            : Color.white.opacity(0.08)
+                    )
                     .foregroundColor(selectedTab == 0 ? .black : .white)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(CockpitChamferShape(topLeftCut: 8, topRightCut: 8, bottomRightCut: 8, bottomLeftCut: 8))
                 }
                 .buttonStyle(.plain)
 
                 Button(action: { selectedTab = 1 }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "list.bullet.rectangle.portrait.fill")
-                        Text("Running Tasks (\(viewModel.runningTasks.count))")
-                            .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    HStack(spacing: 5) {
+                        Image(systemName: "waveform.path.ecg.rectangle.fill")
+                        Text("ECU TASKS (\(viewModel.runningTasks.count))")
+                            .font(.system(size: 11, weight: .black, design: .monospaced))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(selectedTab == 1 ? Color(red: 0.35, green: 0.78, blue: 1.0) : Color.white.opacity(0.08))
+                    .padding(.vertical, 9)
+                    .background(
+                        selectedTab == 1
+                            ? Color(red: 1.0, green: 0.42, blue: 0.14)
+                            : Color.white.opacity(0.08)
+                    )
                     .foregroundColor(selectedTab == 1 ? .black : .white)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(CockpitChamferShape(topLeftCut: 8, topRightCut: 8, bottomRightCut: 8, bottomLeftCut: 8))
                 }
                 .buttonStyle(.plain)
             }
 
             if selectedTab == 0 {
                 ScrollView {
-                    LazyVStack(spacing: 8) {
+                    LazyVStack(spacing: 7) {
                         ForEach(viewModel.agentSnapshots) { snap in
                             AgentPlatformRowCard(snapshot: snap) {
                                 viewModel.activateOrLaunchPlatform(snap)
@@ -788,6 +907,7 @@ struct AgentAndTasksSidePanel: View {
                                 if let win = viewModel.openWindows.first(where: { $0.ownerPID == task.pid || $0.platform == task.platform }) {
                                     viewModel.promoteWindowToStage(win)
                                 } else if let app = NSRunningApplication(processIdentifier: task.pid) {
+                                    NSApp.yieldActivation(to: app)
                                     app.activate(options: [.activateAllWindows])
                                 }
                             }
@@ -798,12 +918,11 @@ struct AgentAndTasksSidePanel: View {
             }
         }
         .padding(12)
-        .background(Color(red: 0.09, green: 0.11, blue: 0.16))
+        .background(Color(red: 0.06, green: 0.08, blue: 0.13).opacity(0.92))
+        .clipShape(panelShape)
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.11), lineWidth: 1)
+            panelShape.stroke(Color(red: 1.0, green: 0.42, blue: 0.14).opacity(0.32), lineWidth: 1.5)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -812,80 +931,88 @@ struct AgentPlatformRowCard: View {
     let onTap: () -> Void
 
     var body: some View {
+        let rowShape = CockpitChamferShape(topLeftCut: 9, topRightCut: 9, bottomRightCut: 9, bottomLeftCut: 9)
+        let rpmFraction = snapshot.state == .offline ? 0.0 : min(1.0, max(0.15, snapshot.cpuPercent / 35.0))
+
         Button(action: onTap) {
             HStack(spacing: 10) {
+                // Left Vertical Accent Bar
+                Rectangle()
+                    .fill(snapshot.state == .offline ? Color.white.opacity(0.15) : snapshot.platform.accentColor)
+                    .frame(width: 4, height: 42)
+
                 if let icon = snapshot.appIcon {
                     Image(nsImage: icon)
                         .resizable()
-                        .frame(width: 36, height: 36)
+                        .frame(width: 34, height: 34)
                 } else {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: 6)
                             .fill(snapshot.platform.accentColor.opacity(0.2))
-                            .frame(width: 36, height: 36)
+                            .frame(width: 34, height: 34)
                         Image(systemName: snapshot.platform.symbolName)
-                            .font(.system(size: 18, weight: .bold))
+                            .font(.system(size: 16, weight: .black))
                             .foregroundColor(snapshot.platform.accentColor)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Text(snapshot.platform.rawValue)
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                        Text(snapshot.platform.rawValue.uppercased())
+                            .font(.system(size: 13, weight: .black, design: .monospaced))
                             .foregroundColor(.white)
 
-                        Text(snapshot.state.rawValue)
-                            .font(.system(size: 9, weight: .black))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
+                        Text(snapshot.state == .working ? "REDLINE" : (snapshot.state == .idle ? "ONLINE" : "PIT"))
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
                             .background(snapshot.state.badgeColor)
-                            .foregroundColor(snapshot.state == .offline ? .white.opacity(0.75) : .black)
-                            .clipShape(Capsule())
+                            .foregroundColor(snapshot.state == .offline ? .white.opacity(0.7) : .black)
                     }
 
-                    Text(snapshot.activeSubtaskSummary ?? "Idle")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.68))
-                        .lineLimit(1)
+                    SegmentedTelemetryBar(
+                        fraction: rpmFraction,
+                        segmentCount: 14,
+                        activeColor: snapshot.platform.accentColor
+                    )
                 }
 
                 Spacer()
 
                 if snapshot.state != .offline {
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(String(format: "%.1f%% CPU", snapshot.cpuPercent))
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(snapshot.cpuPercent >= 5.0 ? Color(red: 0.20, green: 0.94, blue: 0.56) : .white.opacity(0.85))
-                        if snapshot.memoryMB > 0 {
-                            Text(String(format: "%.0f MB", snapshot.memoryMB))
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.55))
-                        }
+                        Text(String(format: "%04.1f%%", snapshot.cpuPercent))
+                            .font(.system(size: 12, weight: .black, design: .monospaced))
+                            .foregroundColor(snapshot.cpuPercent >= 5.0 ? Color(red: 0.15, green: 1.0, blue: 0.60) : .white)
+                        Text(snapshot.memoryMB > 0 ? String(format: "%.0f MB", snapshot.memoryMB) : "ACTIVE")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.55))
                     }
                 } else {
-                    Text("Launch")
-                        .font(.system(size: 11, weight: .bold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.09))
-                        .foregroundColor(.white.opacity(0.8))
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                    Text("IGNITE")
+                        .font(.system(size: 10, weight: .black, design: .monospaced))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Color.white.opacity(0.10))
+                        .foregroundColor(.white.opacity(0.85))
+                        .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
                 }
             }
-            .padding(10)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
             .background(
-                RoundedRectangle(cornerRadius: 11)
-                    .fill(snapshot.state == .offline ? Color.white.opacity(0.04) : Color(red: 0.13, green: 0.16, blue: 0.23))
+                snapshot.state == .offline
+                    ? Color.white.opacity(0.03)
+                    : Color(red: 0.10, green: 0.13, blue: 0.20)
             )
+            .clipShape(rowShape)
             .overlay(
-                RoundedRectangle(cornerRadius: 11)
-                    .stroke(
-                        snapshot.state == .working
-                            ? Color(red: 0.20, green: 0.94, blue: 0.56).opacity(0.8)
-                            : Color.white.opacity(0.08),
-                        lineWidth: snapshot.state == .working ? 1.5 : 1.0
-                    )
+                rowShape.stroke(
+                    snapshot.state == .working
+                        ? Color(red: 0.15, green: 1.0, blue: 0.60)
+                        : Color.white.opacity(0.09),
+                    lineWidth: snapshot.state == .working ? 1.5 : 1.0
+                )
             )
         }
         .buttonStyle(.plain)
@@ -897,64 +1024,69 @@ struct RunningTaskRowView: View {
     let onTap: () -> Void
 
     var body: some View {
+        let shape = CockpitChamferShape(topLeftCut: 7, topRightCut: 7, bottomRightCut: 7, bottomLeftCut: 7)
+
         Button(action: onTap) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(task.cpuPercent >= 5.0 ? Color(red: 0.20, green: 0.94, blue: 0.56) : Color(red: 0.35, green: 0.78, blue: 1.0))
-                    .frame(width: 8, height: 8)
+            HStack(spacing: 8) {
+                SegmentedTelemetryBar(
+                    fraction: min(1.0, max(0.12, task.cpuPercent / 40.0)),
+                    segmentCount: 5,
+                    activeColor: Color(red: 0.20, green: 0.86, blue: 1.0)
+                )
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(task.commandName)
-                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        Text(task.commandName.uppercased())
+                            .font(.system(size: 11, weight: .black, design: .monospaced))
                             .foregroundColor(.white)
                             .lineLimit(1)
 
                         if let plat = task.platform {
-                            Text(plat.rawValue)
-                                .font(.system(size: 9, weight: .black))
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1.5)
+                            Text(plat.rawValue.uppercased())
+                                .font(.system(size: 8, weight: .black, design: .monospaced))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
                                 .background(plat.accentColor)
                                 .foregroundColor(.black)
-                                .clipShape(Capsule())
                         }
                     }
 
                     Text(task.fullCommand)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.55))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
                         .lineLimit(1)
                 }
 
                 Spacer()
 
-                VStack(alignment: .trailing, spacing: 2) {
+                VStack(alignment: .trailing, spacing: 1) {
                     Text(String(format: "%.1f%%", task.cpuPercent))
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
+                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .foregroundColor(Color(red: 0.15, green: 1.0, blue: 0.60))
                     Text("PID \(task.pid)")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.5))
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.45))
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
             .background(Color.white.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .clipShape(shape)
         }
         .buttonStyle(.plain)
     }
 }
 
-// MARK: - 4. Bottom Touch Control & Status Strip
+// MARK: - 4. Bottom Diffuser & Pit-Lane Control Strip
 
 struct BottomStatusStrip: View {
     @ObservedObject var viewModel: CommandCenterViewModel
 
     var body: some View {
+        let stripShape = CockpitChamferShape(topLeftCut: 8, topRightCut: 8, bottomRightCut: 8, bottomLeftCut: 8)
+
         HStack(spacing: 10) {
-            // Live SiS HID Touch Controller Hardware Badge
+            // Live SiS HID Steering / Touch Telemetry Pill
             Button(action: {
                 viewModel.sisRemapToCF15TEnabled.toggle()
             }) {
@@ -962,82 +1094,72 @@ struct BottomStatusStrip: View {
                     Circle()
                         .fill(
                             viewModel.sisIsTouching
-                                ? Color(red: 1.0, green: 0.42, blue: 0.20)
+                                ? Color(red: 1.0, green: 0.38, blue: 0.14)
                                 : (viewModel.sisHardwareConnected
-                                    ? Color(red: 0.20, green: 0.92, blue: 0.60)
+                                    ? Color(red: 0.15, green: 1.0, blue: 0.60)
                                     : Color.white.opacity(0.35))
                         )
-                        .frame(width: 9, height: 9)
+                        .frame(width: 8, height: 8)
                     Text(
                         viewModel.sisIsTouching
-                            ? String(format: "SiS TOUCH (%.0f%%, %.0f%%)", viewModel.sisNormalizedPoint.x * 100, viewModel.sisNormalizedPoint.y * 100)
-                            : (viewModel.sisHardwareConnected ? "SiS 0x0457:0x0819 (\(viewModel.sisRemapToCF15TEnabled ? "CF15T Mapped" : "Raw"))" : "SiS Touch Offline")
+                            ? String(format: "TOUCH LOCK [X:%02.0f Y:%02.0f]", viewModel.sisNormalizedPoint.x * 100, viewModel.sisNormalizedPoint.y * 100)
+                            : (viewModel.sisHardwareConnected ? "SiS-0x0457 // \(viewModel.sisRemapToCF15TEnabled ? "LOCKED TO CF15T" : "RAW")" : "SiS OFFLINE")
                     )
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .font(.system(size: 10, weight: .black, design: .monospaced))
                     .foregroundColor(.white)
                 }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.09))
-                .clipShape(RoundedRectangle(cornerRadius: 9))
+                .padding(.vertical, 7)
+                .background(Color.white.opacity(0.08))
+                .clipShape(stripShape)
             }
             .buttonStyle(.plain)
 
-            // Live Status Pill
-            HStack(spacing: 8) {
-                Text(viewModel.statusBannerMessage)
-                    .font(.system(size: 12, weight: .semibold))
+            // Live Telemetry Status Readout
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right.2")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(Color(red: 1.0, green: 0.78, blue: 0.15))
+                Text(viewModel.statusBannerMessage.uppercased())
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.9))
                     .lineLimit(1)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color.white.opacity(0.06))
-            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .padding(.vertical, 7)
+            .background(Color.white.opacity(0.05))
+            .clipShape(stripShape)
 
             Spacer()
 
-            // Toggle Auto-Tile Real macOS Windows on Tap
-            Toggle("Physically Tile macOS Windows on Tap", isOn: $viewModel.autoTileRealWindowsOnTap)
+            Toggle("AUTO-SHIFT WINDOWS", isOn: $viewModel.autoTileRealWindowsOnTap)
                 .toggleStyle(.switch)
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: 10, weight: .black, design: .monospaced))
                 .foregroundColor(.white)
 
-            // Target Display Picker for Real Window Tiling
-            Picker("Tile On:", selection: $viewModel.targetDisplayMode) {
+            Picker("", selection: $viewModel.targetDisplayMode) {
                 ForEach(TargetDisplayMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+                    Text(mode.rawValue.uppercased()).tag(mode)
                 }
             }
-            .frame(width: 220)
-            .font(.system(size: 12, weight: .semibold))
+            .labelsHidden()
+            .frame(width: 175)
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
 
             if !viewModel.isAccessibilityGranted {
                 Button(action: {
                     viewModel.requestAccessibilityPermission()
                 }) {
-                    Label("Grant Window Tiling Access", systemImage: "lock.open.display")
-                        .font(.system(size: 11, weight: .bold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(Color(red: 0.98, green: 0.72, blue: 0.20))
-                        .foregroundColor(.black)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-            }
-
-            if !viewModel.excludedWindowIDs.isEmpty {
-                Button(action: {
-                    viewModel.excludedWindowIDs.removeAll()
-                }) {
-                    Text("Unhide (\(viewModel.excludedWindowIDs.count))")
-                        .font(.system(size: 11, weight: .bold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(Color.white.opacity(0.12))
-                        .foregroundColor(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    HStack(spacing: 4) {
+                        Image(systemName: "key.fill")
+                        Text("UNLOCK AX TILING")
+                    }
+                    .font(.system(size: 10, weight: .black, design: .monospaced))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color(red: 1.0, green: 0.75, blue: 0.15))
+                    .foregroundColor(.black)
+                    .clipShape(stripShape)
                 }
                 .buttonStyle(.plain)
             }
@@ -1045,29 +1167,35 @@ struct BottomStatusStrip: View {
             Button(action: {
                 viewModel.snapPanelToCF15T()
             }) {
-                Label("Move Panel to CF15T", systemImage: "display.2")
-                    .font(.system(size: 11, weight: .bold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Color.white.opacity(0.12))
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                HStack(spacing: 4) {
+                    Image(systemName: "display")
+                    Text("LOCK TO CF15T")
+                }
+                .font(.system(size: 10, weight: .black, design: .monospaced))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color.white.opacity(0.10))
+                .foregroundColor(.white)
+                .clipShape(stripShape)
             }
             .buttonStyle(.plain)
 
             Button(action: {
                 viewModel.refreshAll(captureImages: true)
             }) {
-                Label("Refresh", systemImage: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .bold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Color.white.opacity(0.12))
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                HStack(spacing: 4) {
+                    Image(systemName: "bolt.horizontal.fill")
+                    Text("SCAN")
+                }
+                .font(.system(size: 10, weight: .black, design: .monospaced))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color(red: 0.20, green: 0.86, blue: 1.0).opacity(0.25))
+                .foregroundColor(Color(red: 0.20, green: 0.86, blue: 1.0))
+                .clipShape(stripShape)
             }
             .buttonStyle(.plain)
         }
-        .frame(height: 38)
+        .frame(height: 34)
     }
 }
