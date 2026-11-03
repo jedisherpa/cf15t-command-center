@@ -29,18 +29,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleScreenParametersChanged() {
         Task { @MainActor in
+            let lidClosed = KeepAwakeWorker.shared.isLaptopLidClosed()
+            if lidClosed && viewModel.operatingMode != .fullControl {
+                viewModel.setOperatingMode(.fullControl)
+            }
+            let shieldOnTop = (viewModel.operatingMode == .fullControl || lidClosed)
             let isDocked = (viewModel.operatingMode == .fullControl && viewModel.isFullControlDocked)
             _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(
                 dockedTopBar: isDocked,
-                dockHeight: viewModel.currentDockReserveHeight
+                dockHeight: viewModel.currentDockReserveHeight,
+                alwaysOnTop: shieldOnTop
             )
             viewModel.refreshAll(captureImages: true)
-            if viewModel.operatingMode == .fullControl || viewModel.isLaptopLidClosed {
-                WindowTilingEngine.shared.gatherAllWindowsOntoDisplay(
-                    windows: viewModel.openWindows,
-                    targetDisplay: .externalDisplay,
-                    topDockReserveHeight: viewModel.currentDockReserveHeight
-                )
+
+            // Re-assert Always-On-Top shield after macOS finishes migrating Clamshell windows
+            for delay in [0.35, 0.90] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self = self else { return }
+                    let keepShield = (self.viewModel.operatingMode == .fullControl || KeepAwakeWorker.shared.isLaptopLidClosed())
+                    _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(
+                        dockedTopBar: self.viewModel.isFullControlDocked,
+                        dockHeight: self.viewModel.currentDockReserveHeight,
+                        alwaysOnTop: keepShield
+                    )
+                }
             }
         }
     }

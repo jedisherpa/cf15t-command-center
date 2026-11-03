@@ -39,7 +39,9 @@ cat > "$CONTENTS_DIR/Info.plist" << 'EOF'
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>CF15T Command Center controls microphone mute and input levels for Grok Bot and Dot.</string>
+    <string>CF15T Command Center controls microphone mute, input levels, and Whisper voice dictation for every open program.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>CF15T Command Center streams live voice dictation into open program prompts.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>CF15T Command Center uses system events for audio volume and window management.</string>
 </dict>
@@ -55,11 +57,14 @@ swiftc \
     -framework ApplicationServices \
     -framework CoreAudio \
     -framework AudioToolbox \
+    -framework AVFoundation \
+    -framework Speech \
     -framework IOKit \
     -framework Vision \
     "$PROJECT_DIR/Sources/Models.swift" \
     "$PROJECT_DIR/Sources/AppContentFeedExtractor.swift" \
     "$PROJECT_DIR/Sources/CoreAudioMicManager.swift" \
+    "$PROJECT_DIR/Sources/UniversalVoiceDictationEngine.swift" \
     "$PROJECT_DIR/Sources/WindowTilingEngine.swift" \
     "$PROJECT_DIR/Sources/AgentAndTaskMonitor.swift" \
     "$PROJECT_DIR/Sources/CursorSnapbackEngine.swift" \

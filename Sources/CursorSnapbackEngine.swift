@@ -50,7 +50,7 @@ final class CursorSnapbackEngine {
     func stopMonitoring() {
         if let m = localMouseUpMonitor { NSEvent.removeMonitor(m); localMouseUpMonitor = nil }
         if let m = globalMouseMoveMonitor { NSEvent.removeMonitor(m); globalMouseMoveMonitor = nil }
-        if let m = globalMouseUpMonitor { NSEvent.removeMonitor(m); globalMouseUpMonitor = nil }
+        if let m = globalMouseUpMonitor { NSEvent.removeMonitor(m); globalMouseMoveMonitor = nil }
     }
 
     func warpBackToSavedMainScreenPositionNow() {
@@ -99,13 +99,17 @@ final class CursorSnapbackEngine {
         return screens.first
     }
 
-    // MARK: - Move Command Center Window to CF15T Display (Full Screen or Top Touch Dock)
+    // MARK: - Move Command Center Window to CF15T Display & Shield Against Lid-Close Window Dumping
 
     func moveCommandCenterWindowToCF15T() -> String {
-        return configureCommandCenterWindowFrame(dockedTopBar: false, dockHeight: 112)
+        return configureCommandCenterWindowFrame(dockedTopBar: false, dockHeight: 112, alwaysOnTop: false)
     }
 
-    func configureCommandCenterWindowFrame(dockedTopBar: Bool, dockHeight: CGFloat = 112) -> String {
+    func configureCommandCenterWindowFrame(
+        dockedTopBar: Bool,
+        dockHeight: CGFloat = 112,
+        alwaysOnTop: Bool = false
+    ) -> String {
         guard let window = SiSTouchHardwareDriver.shared.targetCommandCenterWindow ?? NSApp.windows.first(where: { $0.isVisible }) else {
             return "Command Center window not found"
         }
@@ -114,6 +118,8 @@ final class CursorSnapbackEngine {
         }
 
         let vis = targetScreen.visibleFrame
+        window.collectionBehavior = [.managed, .fullScreenPrimary, .canJoinAllSpaces]
+
         if dockedTopBar {
             let clampedH = min(vis.height * 0.52, max(96, dockHeight))
             let dockRect = NSRect(
@@ -125,13 +131,17 @@ final class CursorSnapbackEngine {
             window.minSize = NSSize(width: 640, height: 88)
             window.level = .floating
             window.setFrame(dockRect, display: true, animate: true)
+            window.orderFrontRegardless()
             return "Docked Touch Control Bar at top of \(targetScreen.localizedName) — Live App active below"
         } else {
             window.minSize = NSSize(width: 900, height: 540)
-            window.level = .normal
+            // When alwaysOnTop is true (FULL CONTROL mode or Laptop Lid Closed), keep Command Center at .floating
+            // so macOS NEVER dumps open laptop windows on top of the Command Center!
+            window.level = alwaysOnTop ? .floating : .normal
             window.setFrame(vis, display: true, animate: true)
+            window.orderFrontRegardless()
             window.makeKeyAndOrderFront(nil)
-            return "Expanded Command Center Matrix on \(targetScreen.localizedName) (\(Int(targetScreen.frame.width))×\(Int(targetScreen.frame.height)))"
+            return "Command Center active on \(targetScreen.localizedName) (\(alwaysOnTop ? "Always-On-Top Full Control Shield" : "Orchestrate Mode"))"
         }
     }
 }

@@ -32,8 +32,12 @@ final class CommandCenterViewModel: ObservableObject {
     @Published var isFullControlDocked: Bool = false
     @Published var showTouchKeyboardInDock: Bool = false
     @Published var quickTypeText: String = ""
+    @Published var perTileInstructionDraft: [CGWindowID: String] = [:]
     @Published var isLaptopLidClosed: Bool = false
     @Published var isClamshellBatterySleepDisabled: Bool = false
+
+    var dictationEngine = UniversalVoiceDictationEngine.shared
+    private var dictationCancellable: AnyCancellable?
 
     // Window Tiling & CF15T Options
     @Published var tilingMode: TilingLayoutMode = .centerStageBorder
@@ -108,6 +112,17 @@ final class CommandCenterViewModel: ObservableObject {
         isAccessibilityGranted = WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: false)
         isLaptopLidClosed = KeepAwakeWorker.shared.isLaptopLidClosed()
         isClamshellBatterySleepDisabled = KeepAwakeWorker.shared.isClamshellSleepDisabled()
+
+        dictationCancellable = dictationEngine.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        dictationEngine.onDictationSent = { [weak self] win, text in
+            guard let self = self else { return }
+            self.statusBannerMessage = "🎙️ Sent dictated instruction to \(win.appName): \"\(text)\""
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+                self?.refreshAll(captureImages: true)
+            }
+        }
 
         refreshAudioState()
         refreshAll(captureImages: true)
@@ -282,18 +297,17 @@ final class CommandCenterViewModel: ObservableObject {
         let fetchedWindows = WindowTilingEngine.shared.fetchOpenWindows(capturePreviews: captureImages)
         self.openWindows = fetchedWindows
 
-        // If the user just closed the MacBook lid, automatically switch to FULL CONTROL and pull windows onto CF15T!
+        // If the user just closed the MacBook lid, automatically switch to FULL CONTROL and shield Command Center on top!
         if !wasLidClosed && nowLidClosed {
             if operatingMode != .fullControl {
                 setOperatingMode(.fullControl, promptClamshellAuthIfNeeded: false)
             } else {
-                WindowTilingEngine.shared.gatherAllWindowsOntoDisplay(
-                    windows: fetchedWindows,
-                    targetDisplay: .externalDisplay,
-                    topDockReserveHeight: currentDockReserveHeight
+                _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(
+                    dockedTopBar: false,
+                    alwaysOnTop: true
                 )
             }
-            statusBannerMessage = "Laptop Lid Closed — FULL CONTROL Active on CF15T Touchscreen"
+            statusBannerMessage = "Laptop Lid Closed — Command Center Locked ON TOP in Full Control Mode"
         }
 
         let currentPool = visibleTiledWindows
@@ -339,10 +353,14 @@ final class CommandCenterViewModel: ObservableObject {
         case .orchestrate:
             isFullControlDocked = false
             showTouchKeyboardInDock = false
+            isRightPanelCollapsed = false
             targetDisplayMode = .primaryDisplay
             cursorSnapbackEnabled = true
             SiSTouchHardwareDriver.shared.isFullControlSystemTouchMode = false
-            _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(dockedTopBar: false)
+            _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(
+                dockedTopBar: false,
+                alwaysOnTop: false
+            )
 
             if isUserInitiatedSwitch {
                 // Move open programs back onto the Main MacBook Screen!
@@ -356,66 +374,35 @@ final class CommandCenterViewModel: ObservableObject {
                         stageScale: CGFloat(stageScaleFactor),
                         topDockReserveHeight: 0
                     )
-                } else {
-                    WindowTilingEngine.shared.gatherAllWindowsOntoDisplay(
-                        windows: visibleTiledWindows,
+                } else if let stage = currentStageWindow {
+                    WindowTilingEngine.shared.focusAndFillSingleWindow(
+                        stage,
                         targetDisplay: .primaryDisplay,
-                        topDockReserveHeight: 0
+                        topDockReserveHeight: 0,
+                        fillDisplay: autoTileRealWindowsOnTap
                     )
-                    if let stage = currentStageWindow {
-                        WindowTilingEngine.shared.focusAndFillSingleWindow(
-                            stage,
-                            targetDisplay: .primaryDisplay,
-                            topDockReserveHeight: 0,
-                            fillDisplay: autoTileRealWindowsOnTap
-                        )
-                    }
                 }
             }
-            statusBannerMessage = "ORCHESTRATE MODE — Programs on Main MacBook Screen · Tap CF15T to switch/tile"
+            statusBannerMessage = "ORCHESTRATE MODE — Tap any tile on CF15T to switch/tile programs on your Main MacBook Screen"
 
         case .fullControl:
             keepAwakeEnabled = true
+            isFullControlDocked = false
+            // Expand the Interactive App Matrix across 100% of the screen and enable Per-Tile Voice & Command Decks!
+            isRightPanelCollapsed = true
             targetDisplayMode = .externalDisplay
             cursorSnapbackEnabled = false
             SiSTouchHardwareDriver.shared.isFullControlSystemTouchMode = true
             isClamshellBatterySleepDisabled = KeepAwakeWorker.shared.isClamshellSleepDisabled()
 
-            if isUserInitiatedSwitch {
-                // Immediately dock the Touch Control Bar at the top of the CF15T and pull live programs onto the CF15T below it!
-                isFullControlDocked = true
-                let dockH = currentDockReserveHeight
-                _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(dockedTopBar: true, dockHeight: dockH)
+            // Lock the Command Center FULL-SCREEN and ALWAYS-ON-TOP (.floating) on the CF15T so closing the laptop
+            // NEVER dumps open laptop windows on top of the Command Center!
+            _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(
+                dockedTopBar: false,
+                alwaysOnTop: true
+            )
 
-                WindowTilingEngine.shared.gatherAllWindowsOntoDisplay(
-                    windows: visibleTiledWindows,
-                    targetDisplay: .externalDisplay,
-                    topDockReserveHeight: dockH
-                )
-
-                if let stage = currentStageWindow ?? visibleTiledWindows.first {
-                    let borders = visibleTiledWindows.filter { $0.id != stage.id }
-                    if borders.isEmpty {
-                        WindowTilingEngine.shared.focusAndFillSingleWindow(
-                            stage,
-                            targetDisplay: .externalDisplay,
-                            topDockReserveHeight: dockH,
-                            fillDisplay: true
-                        )
-                    } else {
-                        WindowTilingEngine.shared.tileWindowsOnScreen(
-                            stageWindow: stage,
-                            borderWindows: borders,
-                            mode: tilingMode,
-                            targetDisplay: .externalDisplay,
-                            stageScale: CGFloat(stageScaleFactor),
-                            topDockReserveHeight: dockH
-                        )
-                    }
-                }
-            }
-
-            statusBannerMessage = "FULL CONTROL ACTIVE ON CF15T — All programs moved to CF15T Touchscreen (Works with laptop open or closed)"
+            statusBannerMessage = "🚀 FULL CONTROL MODE — Command Center Locked On Top · Use 🎙️ DICTATE on any app tile to voice-command it!"
         }
     }
 
@@ -598,9 +585,12 @@ final class CommandCenterViewModel: ObservableObject {
         }
 
         if operatingMode == .fullControl {
-            // In FULL CONTROL (Laptop Closed / Travel) mode, tapping a program docks the Command Center
-            // to the top bar of the CF15T and fills the remaining CF15T screen with that live program!
-            openWindowInFullControlCanvas(window)
+            // In FULL CONTROL mode, promote the tapped app to #1 Center Stage inside the Command Center
+            // (keeping the Command Center Always-On-Top so desktop windows never cover it!)
+            statusBannerMessage = "FULL CONTROL: \(window.appName) is now #1 Center Stage — Tap 🎙️ DICTATE to speak your next instruction"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.refreshAll(captureImages: true)
+            }
             return
         }
 
@@ -621,6 +611,39 @@ final class CommandCenterViewModel: ObservableObject {
         } else {
             WindowTilingEngine.shared.focusWindow(window)
             statusBannerMessage = "Switched to \(window.appName) (\(Int(window.bounds.width))×\(Int(window.bounds.height)))"
+        }
+    }
+
+    // MARK: - Universal Per-Tile Voice Dictation & Instruction Actions (For Every App)
+
+    func isDictating(for window: MonitoredWindow) -> Bool {
+        dictationEngine.isRecording && dictationEngine.targetWindowID == window.id
+    }
+
+    func toggleVoiceDictation(for window: MonitoredWindow) {
+        stageWindowID = window.id
+        dictationEngine.toggleDictation(for: window)
+        statusBannerMessage = dictationEngine.statusText
+    }
+
+    func sendInstructionDraft(for window: MonitoredWindow, pressReturn: Bool = true) {
+        let draft = (perTileInstructionDraft[window.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else {
+            // If no typed draft, send just Return key
+            if pressReturn {
+                WindowTilingEngine.shared.sendKeystrokeToTargetWindow(keyCode: 36, targetWindow: window)
+            }
+            return
+        }
+        perTileInstructionDraft[window.id] = ""
+        dictationEngine.deliverInstructionToWindow(draft, window: window, pressReturn: pressReturn)
+    }
+
+    func scrollWindowInBackground(_ window: MonitoredWindow, deltaY: Int32) {
+        WindowTilingEngine.shared.sendScrollToTargetWindow(deltaY: deltaY, targetWindow: window)
+        statusBannerMessage = "Scrolled \(window.appName) \(deltaY > 0 ? "Up" : "Down")"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.refreshAll(captureImages: true)
         }
     }
 

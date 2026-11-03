@@ -44,11 +44,14 @@ struct CommandCenterMainView: View {
                     DualOperatingModeSwitcherBanner(viewModel: viewModel)
 
                     // 1. Voice Switchboard (Grok Bot <-> Dot) + Twin Gauges + 5-Axis Workload Balance Radar
-                    TopVoiceAndSystemBar(
-                        viewModel: viewModel,
-                        totalCPULoad: totalSystemCPULoad,
-                        currentGear: currentGearNumber
-                    )
+                    // Shown in ORCHESTRATE mode; collapsed in FULL CONTROL mode so interactive program stations fill 100% of the screen
+                    if viewModel.operatingMode == .orchestrate {
+                        TopVoiceAndSystemBar(
+                            viewModel: viewModel,
+                            totalCPULoad: totalSystemCPULoad,
+                            currentGear: currentGearNumber
+                        )
+                    }
 
                     // 2. Main Adjustable Split Cockpit: Window Tiling Matrix (Left) | Draggable Handle | AI Engines & Tasks (Right)
                     GeometryReader { geo in
@@ -853,6 +856,7 @@ struct CenterStagePerimeterCanvas: View {
                 ForEach(telemetryNodes, id: \.window.id) { node in
                     let isStage = (node.rankIndex == 0 && viewModel.tilingMode != .equalSimultaneousGrid)
                     InteractiveWindowTileCard(
+                        viewModel: viewModel,
                         node: node,
                         isCenterStage: isStage,
                         viewMode: viewModel.tileContentViewMode,
@@ -888,6 +892,8 @@ struct CenterStagePerimeterCanvas: View {
 }
 
 struct InteractiveWindowTileCard: View {
+    @ObservedObject var viewModel: CommandCenterViewModel
+    @ObservedObject var dictationEngine = UniversalVoiceDictationEngine.shared
     let node: WindowTelemetryNode
     let isCenterStage: Bool
     let viewMode: TileContentViewMode
@@ -923,123 +929,176 @@ struct InteractiveWindowTileCard: View {
         let accent = appThemeColor
         let cut: CGFloat = isCenterStage ? 18 : 11
         let tileShape = CockpitChamferShape(topLeftCut: cut, topRightCut: cut, bottomRightCut: cut, bottomLeftCut: cut)
+        let isDictatingThisTile = viewModel.isDictating(for: window)
+        let isFullControl = (viewModel.operatingMode == .fullControl)
         let roleBadge = isCenterStage
             ? String(format: "★ #1 STAGE · %.0f%%", node.areaPercent)
             : String(format: "#%d · %.0f%%", node.rankIndex + 1, node.areaPercent)
 
-        Button(action: onTapPromote) {
-            ZStack(alignment: .bottomLeading) {
-                // High-Clarity Program Visual (Split Live Cropped Screen + Feed, Live Screen Only, or Reader Feed)
-                GeometryReader { cardGeo in
-                    ZStack {
-                        Color(red: 0.04, green: 0.06, blue: 0.10)
+        ZStack(alignment: .bottomLeading) {
+            // High-Clarity Program Visual (Split Live Cropped Screen + Feed, Live Screen Only, or Reader Feed)
+            GeometryReader { cardGeo in
+                ZStack {
+                    Color(red: 0.04, green: 0.06, blue: 0.10)
 
-                        SimplifiedAppContentView(
-                            window: window,
-                            accent: accent,
-                            isCenterStage: isCenterStage,
-                            viewMode: viewMode,
-                            fontScale: fontScale,
-                            cardSize: cardGeo.size
-                        )
-                        .padding(.top, isCenterStage ? 32 : 26)
-                        .padding(.bottom, isCenterStage ? 26 : 22)
-                        .padding(.horizontal, isCenterStage ? 8 : 5)
-                    }
-                }
-
-                // HUD Corner Brackets inside Center Stage
-                if isCenterStage {
-                    HUDCornerBrackets(
-                        color: Color(red: 0.15, green: 1.0, blue: 0.62),
-                        lineWidth: 3.0,
-                        length: 28
+                    SimplifiedAppContentView(
+                        window: window,
+                        accent: accent,
+                        isCenterStage: isCenterStage,
+                        viewMode: viewMode,
+                        fontScale: fontScale,
+                        cardSize: cardGeo.size
                     )
-                    .padding(6)
+                    .padding(.top, isCenterStage ? 34 : 28)
+                    .padding(.bottom, isFullControl ? (isCenterStage ? 38 : 34) : (isCenterStage ? 26 : 22))
+                    .padding(.horizontal, isCenterStage ? 8 : 5)
                 }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onTapPromote()
+                }
+            }
 
-                // Top & Bottom Telemetry Overlay Bars
-                VStack(alignment: .leading, spacing: 0) {
-                    // Top Bar: Rank + Program Name + Voice Status + Boost Button
-                    HStack(spacing: 6) {
-                        Text(roleBadge)
-                            .font(.system(size: isCenterStage ? 10 : 8, weight: .black, design: .monospaced))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2.5)
-                            .background(isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62) : accent)
-                            .foregroundColor(.black)
-                            .lineLimit(1)
+            // HUD Corner Brackets inside Center Stage
+            if isCenterStage {
+                HUDCornerBrackets(
+                    color: isDictatingThisTile
+                        ? Color(red: 1.0, green: 0.25, blue: 0.32)
+                        : Color(red: 0.15, green: 1.0, blue: 0.62),
+                    lineWidth: 3.0,
+                    length: 28
+                )
+                .padding(6)
+                .allowsHitTesting(false)
+            }
 
-                        if let icon = window.appIcon {
-                            Image(nsImage: icon)
-                                .resizable()
-                                .frame(width: isCenterStage ? 16 : 13, height: isCenterStage ? 16 : 13)
-                        }
-
-                        Text(window.appName.uppercased())
-                            .font(.system(size: isCenterStage ? 13 : 10, weight: .black, design: .monospaced))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-
-                        Spacer(minLength: 2)
-
-                        // Voice Channel Badge if this window is Grok Bot (CH-01) or Dot / ChatGPT (CH-02)
-                        if let voiceCode = node.voiceChannelCode {
-                            HStack(spacing: 3) {
-                                Image(systemName: node.isMicLive ? "mic.fill" : "waveform")
-                                    .font(.system(size: 8, weight: .black))
-                                Text(
-                                    node.isMicLive
-                                        ? "\(voiceCode) MIC LIVE"
-                                        : (node.isActiveVoiceTarget ? "\(voiceCode) VOICE TARGET" : voiceCode)
-                                )
-                                .font(.system(size: 8.5, weight: .black, design: .monospaced))
-                            }
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2.5)
-                            .background(
-                                node.isMicLive
-                                    ? Color(red: 0.15, green: 1.0, blue: 0.58)
-                                    : (node.isActiveVoiceTarget ? Color(red: 1.0, green: 0.78, blue: 0.18) : Color.white.opacity(0.18))
-                            )
-                            .foregroundColor(node.isMicLive || node.isActiveVoiceTarget ? .black : .white)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                        }
-
-                        if isCenterStage {
-                            Button(action: onFocusOnly) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "bolt.fill")
-                                    Text("BRING TO FRONT")
-                                }
-                                .font(.system(size: 9.5, weight: .black, design: .monospaced))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color(red: 1.0, green: 0.78, blue: 0.15))
+            // Top & Bottom Telemetry + Universal Voice Dictation Overlay Bars
+            VStack(alignment: .leading, spacing: 0) {
+                // Top Bar: Rank + Program Name + Universal Whisper Mic Button + Voice Status + Boost Button
+                HStack(spacing: 6) {
+                    Button(action: onTapPromote) {
+                        HStack(spacing: 5) {
+                            Text(roleBadge)
+                                .font(.system(size: isCenterStage ? 10 : 8, weight: .black, design: .monospaced))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2.5)
+                                .background(isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62) : accent)
                                 .foregroundColor(.black)
-                                .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
-                            }
-                            .buttonStyle(.plain)
-                        }
+                                .lineLimit(1)
 
-                        Button(action: onExclude) {
-                            Image(systemName: "eye.slash.fill")
-                                .font(.system(size: 9, weight: .black))
-                                .foregroundColor(.white.opacity(0.75))
-                                .padding(5)
-                                .background(Color.black.opacity(0.55))
-                                .clipShape(Circle())
+                            if let icon = window.appIcon {
+                                Image(nsImage: icon)
+                                    .resizable()
+                                    .frame(width: isCenterStage ? 16 : 13, height: isCenterStage ? 16 : 13)
+                            }
+
+                            Text(window.appName.uppercased())
+                                .font(.system(size: isCenterStage ? 13 : 10, weight: .black, design: .monospaced))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer(minLength: 2)
+
+                    // UNIVERSAL WHISPER MICROPHONE BUTTON ON EVERY TILE (Works in both ORCHESTRATE & FULL CONTROL)
+                    Button {
+                        viewModel.toggleVoiceDictation(for: window)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: isDictatingThisTile ? "stop.circle.fill" : "mic.fill")
+                                .font(.system(size: isCenterStage ? 11 : 9.5, weight: .black))
+                            Text(isDictatingThisTile ? "SEND VOICE ⏎" : (isCenterStage ? "🎙️ WHISPER DICTATE" : "🎙️ DICTATE"))
+                                .font(.system(size: isCenterStage ? 9.5 : 8, weight: .black, design: .monospaced))
+                        }
+                        .padding(.horizontal, isCenterStage ? 10 : 7)
+                        .padding(.vertical, isCenterStage ? 4.5 : 3)
+                        .background(
+                            isDictatingThisTile
+                                ? Color(red: 1.0, green: 0.22, blue: 0.30)
+                                : Color(red: 0.15, green: 0.96, blue: 0.62)
+                        )
+                        .foregroundColor(isDictatingThisTile ? .white : .black)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .shadow(
+                            color: (isDictatingThisTile ? Color.red : Color(red: 0.15, green: 0.96, blue: 0.62)).opacity(0.45),
+                            radius: 5
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Dictate next instruction with local Whisper into \(window.appName)'s open prompt")
+
+                    // Voice Channel Badge if this window is Grok Bot (CH-01) or Dot / ChatGPT (CH-02)
+                    if let voiceCode = node.voiceChannelCode {
+                        HStack(spacing: 3) {
+                            Image(systemName: node.isMicLive ? "mic.fill" : "waveform")
+                                .font(.system(size: 8, weight: .black))
+                            Text(
+                                node.isMicLive
+                                    ? "\(voiceCode) MIC LIVE"
+                                    : (node.isActiveVoiceTarget ? "\(voiceCode) VOICE TARGET" : voiceCode)
+                            )
+                            .font(.system(size: 8.5, weight: .black, design: .monospaced))
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2.5)
+                        .background(
+                            node.isMicLive
+                                ? Color(red: 0.15, green: 1.0, blue: 0.58)
+                                : (node.isActiveVoiceTarget ? Color(red: 1.0, green: 0.78, blue: 0.18) : Color.white.opacity(0.18))
+                        )
+                        .foregroundColor(node.isMicLive || node.isActiveVoiceTarget ? .black : .white)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+
+                    if isCenterStage && !isFullControl {
+                        Button(action: onFocusOnly) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "bolt.fill")
+                                Text("BRING TO FRONT")
+                            }
+                            .font(.system(size: 9.5, weight: .black, design: .monospaced))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(red: 1.0, green: 0.78, blue: 0.15))
+                            .foregroundColor(.black)
+                            .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help("Hide \(window.appName) from Matrix")
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.black.opacity(0.88))
 
-                    Spacer()
+                    Button(action: onExclude) {
+                        Image(systemName: "eye.slash.fill")
+                            .font(.system(size: 9, weight: .black))
+                            .foregroundColor(.white.opacity(0.75))
+                            .padding(5)
+                            .background(Color.black.opacity(0.55))
+                            .clipShape(Circle())
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Hide \(window.appName) from Matrix")
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.black.opacity(0.90))
 
-                    // Bottom Bar: Window Title / AI Platform + Real CPU % + Real Window Dimensions
+                Spacer()
+
+                // Bottom Bar:
+                // - In FULL CONTROL mode: Interactive Whisper Voice + Prompt Deck + Scroll Up/Down + Peek App
+                // - In ORCHESTRATE mode: Window Title / AI Platform + Real CPU % + Real Window Dimensions
+                if isFullControl {
+                    FullControlTileBottomDeck(
+                        viewModel: viewModel,
+                        window: window,
+                        isCenterStage: isCenterStage
+                    )
+                } else {
                     HStack(spacing: 6) {
                         if let plat = window.platform {
                             Text("AI // \(plat.rawValue.uppercased())")
@@ -1086,21 +1145,30 @@ struct InteractiveWindowTileCard: View {
                     .background(Color.black.opacity(0.82))
                 }
             }
-            .clipShape(tileShape)
-            .overlay(
-                tileShape.stroke(
-                    node.isMicLive
-                        ? Color(red: 0.15, green: 1.0, blue: 0.58)
-                        : (isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62) : accent.opacity(0.65)),
-                    lineWidth: (isCenterStage || node.isMicLive) ? 3.0 : 1.4
-                )
-            )
-            .shadow(
-                color: isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62).opacity(0.35) : .black.opacity(0.4),
-                radius: isCenterStage ? 12 : 4
-            )
+
+            // Active Per-Tile Whisper Voice Dictation HUD Overlay
+            if isDictatingThisTile {
+                PerTileVoiceDictationOverlay(viewModel: viewModel, window: window)
+                    .padding(isCenterStage ? 10 : 4)
+            }
         }
-        .buttonStyle(.plain)
+        .clipShape(tileShape)
+        .overlay(
+            tileShape.stroke(
+                isDictatingThisTile
+                    ? Color(red: 1.0, green: 0.22, blue: 0.30)
+                    : (node.isMicLive
+                        ? Color(red: 0.15, green: 1.0, blue: 0.58)
+                        : (isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62) : accent.opacity(0.65))),
+                lineWidth: (isDictatingThisTile || isCenterStage || node.isMicLive) ? 3.0 : 1.4
+            )
+        )
+        .shadow(
+            color: isDictatingThisTile
+                ? Color(red: 1.0, green: 0.22, blue: 0.30).opacity(0.55)
+                : (isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62).opacity(0.35) : .black.opacity(0.4)),
+            radius: (isDictatingThisTile || isCenterStage) ? 12 : 4
+        )
     }
 }
 
