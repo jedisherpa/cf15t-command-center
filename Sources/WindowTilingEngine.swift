@@ -108,6 +108,7 @@ final class WindowTilingEngine {
                 appIcon: appIcon,
                 previewImage: preview
             )
+            win.focusedContentImage = AppContentFeedExtractor.shared.cropActiveConversationImage(from: preview, for: win)
             win.liveDigest = AppContentFeedExtractor.shared.extractLiveDigest(for: win)
             result.append(win)
         }
@@ -193,7 +194,8 @@ final class WindowTilingEngine {
         stageWindow: MonitoredWindow,
         borderWindows: [MonitoredWindow],
         mode: TilingLayoutMode,
-        targetDisplay: TargetDisplayMode
+        targetDisplay: TargetDisplayMode,
+        stageScale: CGFloat = 0.62
     ) {
         let allToTile = [stageWindow] + borderWindows.filter { $0.id != stageWindow.id }
         guard !allToTile.isEmpty else { return }
@@ -209,7 +211,8 @@ final class WindowTilingEngine {
         let frames = computeLayoutFrames(
             count: allToTile.count,
             canvas: canvas,
-            mode: mode
+            mode: mode,
+            stageScale: stageScale
         )
 
         // Apply frames to border windows first and bring them on screen, then stage window last so it's raised on top
@@ -232,7 +235,13 @@ final class WindowTilingEngine {
 
     // MARK: - Compute Tiling Geometry (Quartz Top-Left Origin Coordinates)
 
-    func computeLayoutFrames(count: Int, canvas: CGRect, mode: TilingLayoutMode, gap: CGFloat = 10) -> [CGRect] {
+    func computeLayoutFrames(
+        count: Int,
+        canvas: CGRect,
+        mode: TilingLayoutMode,
+        gap: CGFloat = 10,
+        stageScale: CGFloat = 0.62
+    ) -> [CGRect] {
         guard count > 0,
               !canvas.isNull,
               !canvas.isInfinite,
@@ -251,16 +260,18 @@ final class WindowTilingEngine {
             return [sanitizeRect(insetCanvas)]
         }
 
+        let clampedScale = max(0.42, min(0.80, stageScale))
+
         let rawRects: [CGRect]
         switch mode {
         case .centerStageBorder:
-            rawRects = computeCenterStageWithPerimeterBorder(count: count, area: insetCanvas, gap: gap)
+            rawRects = computeCenterStageWithPerimeterBorder(count: count, area: insetCanvas, gap: gap, stageScale: clampedScale)
 
         case .goldenFibonacciSpiral:
             rawRects = computeGoldenFibonacciSpiral(count: count, area: insetCanvas, gap: gap)
 
         case .leftStagePerimeter:
-            rawRects = computeLeftStageWithRightBottomBorder(count: count, area: insetCanvas, gap: gap)
+            rawRects = computeLeftStageWithRightBottomBorder(count: count, area: insetCanvas, gap: gap, stageScale: clampedScale)
 
         case .equalSimultaneousGrid:
             rawRects = computeEqualGrid(count: count, area: insetCanvas, gap: gap)
@@ -354,11 +365,10 @@ final class WindowTilingEngine {
 
     /// Places the active window large in the center (or center-top) and arranges all other windows around the border
     /// so every single window remains visible simultaneously around the edges.
-    private func computeCenterStageWithPerimeterBorder(count: Int, area: CGRect, gap: CGFloat) -> [CGRect] {
+    private func computeCenterStageWithPerimeterBorder(count: Int, area: CGRect, gap: CGFloat, stageScale: CGFloat) -> [CGRect] {
         let borderCount = count - 1
         if borderCount == 1 {
-            // 1 stage (70% width) + 1 right border tile (30% width)
-            let stageW = floor((area.width - gap) * 0.70)
+            let stageW = floor((area.width - gap) * stageScale)
             let rightW = area.width - gap - stageW
             let stageRect = CGRect(x: area.minX, y: area.minY, width: stageW, height: area.height)
             let rightRect = CGRect(x: area.minX + stageW + gap, y: area.minY, width: rightW, height: area.height)
@@ -366,8 +376,7 @@ final class WindowTilingEngine {
         }
 
         if borderCount == 2 {
-            // Stage in Center-Left (68% width), 2 stacked tiles on Right border (32% width)
-            let stageW = floor((area.width - gap) * 0.68)
+            let stageW = floor((area.width - gap) * stageScale)
             let rightW = area.width - gap - stageW
             let stageRect = CGRect(x: area.minX, y: area.minY, width: stageW, height: area.height)
             let tileH = floor((area.height - gap) / 2.0)
@@ -376,15 +385,16 @@ final class WindowTilingEngine {
             return [stageRect, r1, r2]
         }
 
+        let sideFraction = max(0.12, (1.0 - stageScale) * 0.50)
+        let bottomFraction = max(0.16, (1.0 - stageScale) * 0.60)
+
         if borderCount <= 4 {
-            // True surround border: Left column (1 tile), Center Stage (large), Right column (1-2 tiles), Bottom strip (1 tile)
-            let leftW = floor(area.width * 0.21)
-            let rightW = floor(area.width * 0.21)
+            let leftW = floor(area.width * sideFraction)
+            let rightW = floor(area.width * sideFraction)
             let centerW = area.width - leftW - rightW - (gap * 2)
-            let bottomH = floor(area.height * 0.24)
+            let bottomH = floor(area.height * bottomFraction)
             let stageH = area.height - bottomH - gap
 
-            // Stage in upper-center
             let stageRect = CGRect(
                 x: area.minX + leftW + gap,
                 y: area.minY,
@@ -424,8 +434,8 @@ final class WindowTilingEngine {
         }
 
         // For 5+ border windows: Center Stage surrounded by Left rail, Right rail, and Bottom perimeter row
-        let sideW = floor(area.width * 0.20)
-        let bottomH = floor(area.height * 0.24)
+        let sideW = floor(area.width * sideFraction)
+        let bottomH = floor(area.height * bottomFraction)
         let centerW = area.width - (sideW * 2) - (gap * 2)
         let stageH = area.height - bottomH - gap
 
@@ -470,9 +480,9 @@ final class WindowTilingEngine {
         return results
     }
 
-    private func computeLeftStageWithRightBottomBorder(count: Int, area: CGRect, gap: CGFloat) -> [CGRect] {
+    private func computeLeftStageWithRightBottomBorder(count: Int, area: CGRect, gap: CGFloat, stageScale: CGFloat) -> [CGRect] {
         let borderCount = count - 1
-        let stageW = floor((area.width - gap) * 0.66)
+        let stageW = floor((area.width - gap) * stageScale)
         let rightW = area.width - gap - stageW
 
         if borderCount <= 3 {

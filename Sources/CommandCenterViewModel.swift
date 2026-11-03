@@ -31,6 +31,23 @@ final class CommandCenterViewModel: ObservableObject {
     @Published var targetDisplayMode: TargetDisplayMode = .primaryDisplay
     @Published var autoTileRealWindowsOnTap: Bool = true
     @Published var captureLivePreviews: Bool = true
+
+    // Adjustable Layout, Visuals & Program Selection Settings
+    @Published var isShowingSettingsSheet: Bool = false
+    @Published var programSelectionMode: ProgramSelectionMode = .automatic
+    @Published var customAllowedApps: Set<String> = [
+        "grok bot", "chatgpt", "antigravity", "signal", "whatsapp", "claude", "codex", "google chrome"
+    ]
+    @Published var hiddenAppNamesInAutoMode: Set<String> = []
+    @Published var defaultStageAppName: String = "" // "" = Automatic (Active Voice / AI Agent)
+    @Published var tileContentViewMode: TileContentViewMode = .splitVisualAndFeed
+    @Published var stageScaleFactor: Double = 0.62
+    @Published var matrixWidthRatio: Double = 0.70
+    @Published var isRightPanelCollapsed: Bool = false
+    @Published var feedFontScale: Double = 1.0
+    @Published var maxTiledWindows: Int = 8
+    @Published var showFloatingFlowLines: Bool = false
+
     @Published var cursorSnapbackEnabled: Bool = true {
         didSet {
             CursorSnapbackEngine.shared.isSnapbackEnabled = cursorSnapbackEnabled
@@ -62,9 +79,21 @@ final class CommandCenterViewModel: ObservableObject {
     private var refreshTimer: Timer?
     private let defaultsKeySlotA = "cf15t.voice.slotA"
     private let defaultsKeySlotB = "cf15t.voice.slotB"
+    private let defaultsKeySelectionMode = "cf15t.programs.mode"
+    private let defaultsKeyCustomAllowed = "cf15t.programs.customAllowed"
+    private let defaultsKeyAutoHidden = "cf15t.programs.autoHidden"
+    private let defaultsKeyDefaultStageApp = "cf15t.programs.defaultStageApp"
+    private let defaultsKeyTileViewMode = "cf15t.ui.tileViewMode"
+    private let defaultsKeyStageScale = "cf15t.ui.stageScale"
+    private let defaultsKeyMatrixWidth = "cf15t.ui.matrixWidth"
+    private let defaultsKeyFontScale = "cf15t.ui.fontScale"
+    private let defaultsKeyMaxWindows = "cf15t.ui.maxWindows"
+    private let defaultsKeyShowFlowLines = "cf15t.ui.showFlowLines"
+    private let defaultsKeyTilingMode = "cf15t.ui.tilingMode"
 
     init() {
         loadVoiceConfigs()
+        loadDashboardPreferences()
         isAccessibilityGranted = WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: false)
         CursorSnapbackEngine.shared.isSnapbackEnabled = cursorSnapbackEnabled
         CursorSnapbackEngine.shared.startMonitoring()
@@ -96,11 +125,120 @@ final class CommandCenterViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Computed Stage & Border Windows
+    // MARK: - Computed Stage & Border Windows + Program Filtering
+
+    func normalizedAppKey(_ appName: String) -> String {
+        appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    func isProgramDisplayed(_ appName: String) -> Bool {
+        let key = normalizedAppKey(appName)
+        switch programSelectionMode {
+        case .automatic:
+            return !hiddenAppNamesInAutoMode.contains(key)
+        case .customDefaults:
+            return customAllowedApps.contains(key)
+        }
+    }
+
+    func toggleProgramDisplayed(_ appName: String) {
+        let key = normalizedAppKey(appName)
+        // Clear any one-off window ID exclusions for this app so the toggle takes effect immediately
+        for win in openWindows where normalizedAppKey(win.appName) == key {
+            excludedWindowIDs.remove(win.id)
+        }
+
+        switch programSelectionMode {
+        case .automatic:
+            if hiddenAppNamesInAutoMode.contains(key) {
+                hiddenAppNamesInAutoMode.remove(key)
+                statusBannerMessage = "Showing \(appName) in Window Tiling Matrix"
+            } else {
+                hiddenAppNamesInAutoMode.insert(key)
+                statusBannerMessage = "Hidden \(appName) from Window Tiling Matrix"
+            }
+        case .customDefaults:
+            if customAllowedApps.contains(key) {
+                customAllowedApps.remove(key)
+                statusBannerMessage = "Removed \(appName) from Custom Displayed Programs"
+            } else {
+                customAllowedApps.insert(key)
+                statusBannerMessage = "Added \(appName) to Custom Displayed Programs"
+            }
+        }
+    }
+
+    var allSelectablePrograms: [SelectableProgramEntry] {
+        var entriesByKey: [String: SelectableProgramEntry] = [:]
+
+        // 1. Add all currently open programs
+        let groupedOpen = Dictionary(grouping: openWindows, by: { normalizedAppKey($0.appName) })
+        for (key, wins) in groupedOpen {
+            guard let first = wins.first else { continue }
+            let cat: String = {
+                if first.platform != nil { return "AI AGENT" }
+                let style = AppContentFeedExtractor.shared.classifyStyle(for: first)
+                switch style {
+                case .messagingChat: return "MESSAGING"
+                case .aiAgentThread: return "AI AGENT"
+                case .browserDocument: return "BROWSER"
+                case .mediaNowPlaying: return "MEDIA"
+                case .systemInspector: return "MAC APP"
+                }
+            }()
+            let displayName = (key == "chatgpt") ? "ChatGPT (Dot)" : first.appName
+            entriesByKey[key] = SelectableProgramEntry(
+                id: key,
+                displayName: displayName,
+                categoryLabel: cat,
+                isCurrentlyOpen: true,
+                openWindowCount: wins.count,
+                appIcon: first.appIcon
+            )
+        }
+
+        // 2. Also include well-known AI & Messaging programs even if not currently open so defaults can be set anytime
+        let presets: [(key: String, name: String, category: String)] = [
+            ("grok bot", "Grok Bot", "AI VOICE"),
+            ("chatgpt", "ChatGPT (Dot)", "AI VOICE"),
+            ("antigravity", "Antigravity", "AI AGENT"),
+            ("signal", "Signal", "MESSAGING"),
+            ("whatsapp", "WhatsApp", "MESSAGING"),
+            ("messages", "Messages", "MESSAGING"),
+            ("claude", "Claude", "AI AGENT"),
+            ("codex", "Codex", "AI AGENT"),
+            ("google chrome", "Google Chrome", "BROWSER"),
+            ("safari", "Safari", "BROWSER"),
+            ("music", "Music", "MEDIA"),
+            ("finder", "Finder", "MAC APP"),
+            ("terminal", "Terminal", "MAC APP"),
+            ("system settings", "System Settings", "MAC APP")
+        ]
+
+        for p in presets where entriesByKey[p.key] == nil {
+            entriesByKey[p.key] = SelectableProgramEntry(
+                id: p.key,
+                displayName: p.name,
+                categoryLabel: p.category,
+                isCurrentlyOpen: false,
+                openWindowCount: 0,
+                appIcon: nil
+            )
+        }
+
+        return entriesByKey.values.sorted { a, b in
+            if a.isCurrentlyOpen != b.isCurrentlyOpen {
+                return a.isCurrentlyOpen && !b.isCurrentlyOpen
+            }
+            return a.displayName.localizedCaseInsensitiveCompare(b.displayName) == .orderedAscending
+        }
+    }
 
     var visibleTiledWindows: [MonitoredWindow] {
-        let filtered = openWindows.filter { !excludedWindowIDs.contains($0.id) }
-        return Array(filtered.prefix(9))
+        let filtered = openWindows.filter { win in
+            !excludedWindowIDs.contains(win.id) && isProgramDisplayed(win.appName)
+        }
+        return Array(filtered.prefix(max(2, maxTiledWindows)))
     }
 
     var currentStageWindow: MonitoredWindow? {
@@ -125,17 +263,21 @@ final class CommandCenterViewModel: ObservableObject {
         let fetchedWindows = WindowTilingEngine.shared.fetchOpenWindows(capturePreviews: captureImages)
         self.openWindows = fetchedWindows
 
-        if let currentID = stageWindowID, fetchedWindows.contains(where: { $0.id == currentID }) {
+        let currentPool = visibleTiledWindows
+        if let currentID = stageWindowID, currentPool.contains(where: { $0.id == currentID }) {
             // Keep existing stage selection
+        } else if !defaultStageAppName.isEmpty,
+                  let preferred = currentPool.first(where: { normalizedAppKey($0.appName) == normalizedAppKey(defaultStageAppName) }) {
+            stageWindowID = preferred.id
         } else {
             // Smart default: prefer active Voice Agent window (Grok Bot or Dot/ChatGPT), then any AI agent, then first window
             let activeSlot = (activeVoiceSlotID == "slotA") ? slotA : slotB
-            if let voiceWin = fetchedWindows.first(where: { matchesVoiceSlot($0, slot: activeSlot) }) {
+            if let voiceWin = currentPool.first(where: { matchesVoiceSlot($0, slot: activeSlot) }) {
                 stageWindowID = voiceWin.id
-            } else if let aiWin = fetchedWindows.first(where: { $0.platform != nil }) {
+            } else if let aiWin = currentPool.first(where: { $0.platform != nil }) {
                 stageWindowID = aiWin.id
             } else {
-                stageWindowID = fetchedWindows.first?.id
+                stageWindowID = currentPool.first?.id
             }
         }
 
@@ -251,12 +393,112 @@ final class CommandCenterViewModel: ObservableObject {
             stageWindow: stage,
             borderWindows: borders,
             mode: tilingMode,
-            targetDisplay: targetDisplayMode
+            targetDisplay: targetDisplayMode,
+            stageScale: CGFloat(stageScaleFactor)
         )
 
         statusBannerMessage = "Tiled \(1 + borders.count) windows (\(tilingMode.shortLabel)) — Stage: \(stage.appName)"
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             self?.refreshAll(captureImages: true)
+        }
+    }
+
+    // MARK: - Program Filter Presets & Persistent Defaults
+
+    func selectAllPrograms() {
+        excludedWindowIDs.removeAll()
+        switch programSelectionMode {
+        case .automatic:
+            hiddenAppNamesInAutoMode.removeAll()
+        case .customDefaults:
+            for entry in allSelectablePrograms {
+                customAllowedApps.insert(entry.id)
+            }
+        }
+        statusBannerMessage = "Showing all open programs in Window Tiling Matrix"
+    }
+
+    func selectAIAndMessagingProgramsOnly() {
+        excludedWindowIDs.removeAll()
+        let aiAndChatKeys: Set<String> = [
+            "grok bot", "chatgpt", "antigravity", "signal", "whatsapp",
+            "messages", "claude", "codex", "telegram", "slack", "discord"
+        ]
+        programSelectionMode = .customDefaults
+        customAllowedApps = aiAndChatKeys
+        statusBannerMessage = "Filtered Matrix to AI & Messaging apps only (Signal, ChatGPT, Grok Bot, Antigravity)"
+    }
+
+    func saveDashboardPreferencesAsDefaults() {
+        let d = UserDefaults.standard
+        d.set(programSelectionMode.rawValue, forKey: defaultsKeySelectionMode)
+        d.set(Array(customAllowedApps), forKey: defaultsKeyCustomAllowed)
+        d.set(Array(hiddenAppNamesInAutoMode), forKey: defaultsKeyAutoHidden)
+        d.set(defaultStageAppName, forKey: defaultsKeyDefaultStageApp)
+        d.set(tileContentViewMode.rawValue, forKey: defaultsKeyTileViewMode)
+        d.set(stageScaleFactor, forKey: defaultsKeyStageScale)
+        d.set(matrixWidthRatio, forKey: defaultsKeyMatrixWidth)
+        d.set(feedFontScale, forKey: defaultsKeyFontScale)
+        d.set(maxTiledWindows, forKey: defaultsKeyMaxWindows)
+        d.set(showFloatingFlowLines, forKey: defaultsKeyShowFlowLines)
+        d.set(tilingMode.rawValue, forKey: defaultsKeyTilingMode)
+
+        statusBannerMessage = "Saved your Program Selection & Dashboard Settings as persistent Defaults"
+    }
+
+    func resetToAutomaticDefaults() {
+        programSelectionMode = .automatic
+        hiddenAppNamesInAutoMode.removeAll()
+        excludedWindowIDs.removeAll()
+        defaultStageAppName = ""
+        tileContentViewMode = .splitVisualAndFeed
+        stageScaleFactor = 0.62
+        matrixWidthRatio = 0.70
+        isRightPanelCollapsed = false
+        feedFontScale = 1.0
+        maxTiledWindows = 8
+        showFloatingFlowLines = false
+        saveDashboardPreferencesAsDefaults()
+        statusBannerMessage = "Reset to Automatic Program Selection (showing all open programs)"
+    }
+
+    private func loadDashboardPreferences() {
+        let d = UserDefaults.standard
+        if let modeRaw = d.string(forKey: defaultsKeySelectionMode),
+           let mode = ProgramSelectionMode(rawValue: modeRaw) {
+            programSelectionMode = mode
+        }
+        if let allowedArr = d.stringArray(forKey: defaultsKeyCustomAllowed) {
+            customAllowedApps = Set(allowedArr)
+        }
+        if let hiddenArr = d.stringArray(forKey: defaultsKeyAutoHidden) {
+            hiddenAppNamesInAutoMode = Set(hiddenArr)
+        }
+        if let stageApp = d.string(forKey: defaultsKeyDefaultStageApp) {
+            defaultStageAppName = stageApp
+        }
+        if let viewRaw = d.string(forKey: defaultsKeyTileViewMode),
+           let vm = TileContentViewMode(rawValue: viewRaw) {
+            tileContentViewMode = vm
+        }
+        if d.object(forKey: defaultsKeyStageScale) != nil {
+            stageScaleFactor = max(0.42, min(0.78, d.double(forKey: defaultsKeyStageScale)))
+        }
+        if d.object(forKey: defaultsKeyMatrixWidth) != nil {
+            matrixWidthRatio = max(0.48, min(0.95, d.double(forKey: defaultsKeyMatrixWidth)))
+        }
+        if d.object(forKey: defaultsKeyFontScale) != nil {
+            feedFontScale = max(0.85, min(1.55, d.double(forKey: defaultsKeyFontScale)))
+        }
+        if d.object(forKey: defaultsKeyMaxWindows) != nil {
+            maxTiledWindows = max(2, min(12, d.integer(forKey: defaultsKeyMaxWindows)))
+        }
+        if d.object(forKey: defaultsKeyShowFlowLines) != nil {
+            showFloatingFlowLines = d.bool(forKey: defaultsKeyShowFlowLines)
+        }
+        if let tilingRaw = d.string(forKey: defaultsKeyTilingMode),
+           let tm = TilingLayoutMode(rawValue: tilingRaw) {
+            tilingMode = tm
         }
     }
 

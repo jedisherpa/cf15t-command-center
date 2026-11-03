@@ -7,7 +7,7 @@ final class AppContentFeedExtractor {
 
     private var enabledManualAXPIDs: Set<pid_t> = []
     private var cachedDigests: [CGWindowID: (timestamp: TimeInterval, digest: WindowLiveDigest)] = [:]
-    private let cacheTTL: TimeInterval = 2.2
+    private let cacheTTL: TimeInterval = 2.0
 
     // Noise UI labels to ignore when extracting real conversation / thread content
     private let ignoredChromeLabels: Set<String> = [
@@ -16,12 +16,85 @@ final class AppContentFeedExtractor {
         "new chat", "today", "yesterday", "pinned", "archived", "all", "unread",
         "groups", "calls", "chats", "status", "channels", "communities", "type a message",
         "message", "ask anything", "reply", "copy", "regenerate", "share", "edit",
-        "cancel", "ok", "done", "file", "view", "window", "help", "history", "bookmarks"
+        "cancel", "ok", "done", "file", "view", "window", "help", "history", "bookmarks",
+        "temporary chat", "chatgpt", "grok bot", "signal", "whatsapp", "note to self"
     ]
 
     private init() {}
 
-    // MARK: - Public Entry Point
+    // MARK: - 1. Smart Active-Conversation Crop (Zooms into the Active Thread / Last Messages)
+
+    func cropActiveConversationImage(from fullImage: NSImage?, for window: MonitoredWindow) -> NSImage? {
+        guard let fullImage = fullImage,
+              let cgImage = fullImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+
+        let w = CGFloat(cgImage.width)
+        let h = CGFloat(cgImage.height)
+        guard w > 120, h > 90 else { return fullImage }
+
+        let style = classifyStyle(for: window)
+        let appLower = window.appName.lowercased()
+
+        // Determine the active region (in top-left pixel coordinates of cgImage)
+        var cropX: CGFloat = 0
+        var cropY: CGFloat = h * 0.07
+        var cropW: CGFloat = w
+        var cropH: CGFloat = h * 0.88
+
+        switch style {
+        case .messagingChat:
+            // Signal, WhatsApp, Messages: Left ~28% is the contact list sidebar; bottom-right 72% is the active chat!
+            if w > 520 {
+                cropX = w * 0.27
+                cropW = w * 0.72
+            }
+            cropY = h * 0.16
+            cropH = h * 0.78
+
+        case .aiAgentThread:
+            // ChatGPT, Claude, Grok Bot: Skip left history sidebar if wide, focus on active response area
+            if w > 760 && (appLower.contains("chatgpt") || appLower.contains("claude")) {
+                cropX = w * 0.22
+                cropW = w * 0.76
+            } else {
+                cropX = w * 0.03
+                cropW = w * 0.94
+            }
+            cropY = h * 0.14
+            cropH = h * 0.80
+
+        case .browserDocument:
+            // Skip browser tab bar & address bar at top 11%
+            cropX = w * 0.02
+            cropW = w * 0.96
+            cropY = h * 0.11
+            cropH = h * 0.85
+
+        case .mediaNowPlaying, .systemInspector:
+            if w > 580 {
+                cropX = w * 0.20
+                cropW = w * 0.78
+            }
+            cropY = h * 0.08
+            cropH = h * 0.88
+        }
+
+        let safeRect = CGRect(
+            x: max(0, min(w - 40, floor(cropX))),
+            y: max(0, min(h - 40, floor(cropY))),
+            width: max(40, min(w - floor(cropX), floor(cropW))),
+            height: max(40, min(h - floor(cropY), floor(cropH)))
+        )
+
+        guard let croppedCG = cgImage.cropping(to: safeRect) else {
+            return fullImage
+        }
+        return NSImage(cgImage: croppedCG, size: NSSize(width: croppedCG.width, height: croppedCG.height))
+    }
+
+    // MARK: - 2. Public Digest Extraction Entry Point
 
     func extractLiveDigest(for window: MonitoredWindow, forceRefresh: Bool = false) -> WindowLiveDigest {
         let now = Date().timeIntervalSinceReferenceDate
@@ -34,7 +107,7 @@ final class AppContentFeedExtractor {
 
         let style = classifyStyle(for: window)
 
-        // 1. Special fast-path if this window is Antigravity (or shows Antigravity brain workspace)
+        // 1. Direct Live Transcript Reader for Antigravity
         if window.platform == .antigravity ||
            window.appName.localizedCaseInsensitiveContains("Antigravity") ||
            window.windowTitle.localizedCaseInsensitiveContains("Antigravity") {
@@ -45,26 +118,25 @@ final class AppContentFeedExtractor {
         }
 
         // 2. Harvest live text blocks from macOS Accessibility tree (AXUIElement)
-        var extractedBlocks = harvestAXTextBlocks(for: window)
-
-        // 3. Fallback / Augmentation via Apple Vision OCR on the live window snapshot if AX returned < 2 blocks
-        if extractedBlocks.count < 2, let preview = window.previewImage {
-            let ocrBlocks = extractVisionOCRBlocks(from: preview, windowBounds: window.bounds)
-            if ocrBlocks.count > extractedBlocks.count {
-                extractedBlocks = ocrBlocks
-            }
+        let axBlocks = harvestAXTextBlocks(for: window).filter { blk in
+            let lower = blk.text.lowercased()
+            return lower != window.appName.lowercased() && lower != window.windowTitle.lowercased()
         }
 
-        // 4. If this is a known AI agent (e.g. Claude / Codex / Grok / ChatGPT) and still empty, check process CLI / Antigravity transcript
-        if extractedBlocks.isEmpty && window.platform == .antigravity {
-            if let agyDigest = buildAntigravityLiveDigest(window: window) {
-                cachedDigests[window.id] = (now, agyDigest)
-                return agyDigest
+        // 3. Always run Apple Vision OCR on the active cropped conversation image if AX returned < 3 real lines
+        var finalBlocks = axBlocks
+        if finalBlocks.count < 3 {
+            let sourceImage = window.focusedContentImage ?? cropActiveConversationImage(from: window.previewImage, for: window) ?? window.previewImage
+            if let img = sourceImage {
+                let ocrBlocks = extractVisionOCRBlocks(from: img, windowBounds: window.bounds)
+                if ocrBlocks.count >= finalBlocks.count {
+                    finalBlocks = ocrBlocks
+                }
             }
         }
 
         let digest = formatBlocksIntoDigest(
-            blocks: extractedBlocks,
+            blocks: finalBlocks,
             window: window,
             style: style
         )
@@ -181,7 +253,7 @@ final class AppContentFeedExtractor {
                             DigestFeedLine(
                                 id: "agy-t-\(idx)",
                                 speakerOrTag: "TOOL",
-                                text: "Running: \(toolNames.joined(separator: ", "))",
+                                text: "Executing: \(toolNames.joined(separator: ", "))",
                                 isIncomingOrAgent: true,
                                 isHighlighted: false
                             )
@@ -268,7 +340,6 @@ final class AppContentFeedExtractor {
         let appRef = AXUIElementCreateApplication(window.ownerPID)
         AXUIElementSetMessagingTimeout(appRef, 0.10)
 
-        // Wake up Electron / Chromium / Catalyst accessibility trees (Signal, Grok Bot, ChatGPT, WhatsApp, Chrome)
         if !enabledManualAXPIDs.contains(window.ownerPID) {
             enabledManualAXPIDs.insert(window.ownerPID)
             AXUIElementSetAttributeValue(appRef, "AXManualAccessibility" as CFString, kCFBooleanTrue)
@@ -281,7 +352,6 @@ final class AppContentFeedExtractor {
             return []
         }
 
-        // Match the specific AXWindow by title or closest position
         let targetAXWindow: AXUIElement = {
             if !window.windowTitle.isEmpty {
                 for axWin in axWindows {
@@ -310,7 +380,6 @@ final class AppContentFeedExtractor {
                 ? ((roleRef as? String) ?? "")
                 : ""
 
-            // Extract text from StaticText, TextArea, Heading, Cell, Row, or Group description
             if role == kAXStaticTextRole as String ||
                role == kAXTextAreaRole as String ||
                role == kAXTextFieldRole as String ||
@@ -346,7 +415,6 @@ final class AppContentFeedExtractor {
                 }
             }
 
-            // Traverse visible children first, fallback to children
             var childrenRef: CFTypeRef?
             if AXUIElementCopyAttributeValue(element, kAXVisibleChildrenAttribute as CFString, &childrenRef) == .success,
                let visChildren = childrenRef as? [AXUIElement], !visChildren.isEmpty {
@@ -364,7 +432,7 @@ final class AppContentFeedExtractor {
         }
 
         walk(targetAXWindow, depth: 0)
-        return deduplicateAndFilterSpatialBlocks(collected, windowBounds: window.bounds)
+        return deduplicateAndFilterSpatialBlocks(collected, windowBounds: window.bounds, alreadyCropped: false)
     }
 
     private func axFrame(of element: AXUIElement) -> CGRect? {
@@ -384,12 +452,12 @@ final class AppContentFeedExtractor {
         return CGRect(origin: pt, size: sz)
     }
 
-    // MARK: - Layer 3: Fast Apple Vision OCR on Live Window Snapshot (For Canvas / Electron / Non-AX Windows)
+    // MARK: - Layer 3: Apple Vision OCR on Active Cropped Conversation Image
 
     private func extractVisionOCRBlocks(from image: NSImage, windowBounds: CGRect) -> [SpatialTextBlock] {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              cgImage.width > 80,
-              cgImage.height > 60 else {
+              cgImage.width > 60,
+              cgImage.height > 40 else {
             return []
         }
 
@@ -401,7 +469,6 @@ final class AppContentFeedExtractor {
                 let cleaned = self.sanitizeExtractedText(topCandidate.string)
                 guard self.isMeaningfulContentLine(cleaned) else { continue }
 
-                // Convert Vision normalized bottom-left coordinates (0..1) to top-down window coordinates
                 let bbox = obs.boundingBox
                 let x = windowBounds.minX + bbox.minX * windowBounds.width
                 let y = windowBounds.minY + (1.0 - bbox.maxY) * windowBounds.height
@@ -418,15 +485,15 @@ final class AppContentFeedExtractor {
             }
         }
         request.recognitionLevel = .fast
-        request.usesLanguageCorrection = false
+        request.usesLanguageCorrection = true
 
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         try? handler.perform([request])
 
-        return deduplicateAndFilterSpatialBlocks(blocks, windowBounds: windowBounds)
+        return deduplicateAndFilterSpatialBlocks(blocks, windowBounds: windowBounds, alreadyCropped: true)
     }
 
-    // MARK: - Spatial Filtering, Sidebar Separation & Message Formatting
+    // MARK: - Spatial Filtering & Paragraph Grouping
 
     private func sanitizeExtractedText(_ raw: String) -> String {
         raw.replacingOccurrences(of: "\r\n", with: " ")
@@ -436,37 +503,39 @@ final class AppContentFeedExtractor {
     }
 
     private func isMeaningfulContentLine(_ text: String) -> Bool {
-        guard text.count >= 3 else { return false }
+        guard text.count >= 4 else { return false }
         let lower = text.lowercased()
         if ignoredChromeLabels.contains(lower) { return false }
 
-        // Ignore bare timestamps like "10:42 AM", "19:14", or bare numbers/percentages
         let timestampPattern = #"^\d{1,2}:\d{2}(\s?[APap][Mm])?$"#
         if text.range(of: timestampPattern, options: .regularExpression) != nil {
             return false
         }
 
-        // Require at least 2 letters so punctuation/icon glyphs are ignored
         let letterCount = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
-        return letterCount >= 2
+        return letterCount >= 3
     }
 
-    private func deduplicateAndFilterSpatialBlocks(_ blocks: [SpatialTextBlock], windowBounds: CGRect) -> [SpatialTextBlock] {
+    private func deduplicateAndFilterSpatialBlocks(
+        _ blocks: [SpatialTextBlock],
+        windowBounds: CGRect,
+        alreadyCropped: Bool
+    ) -> [SpatialTextBlock] {
         guard !blocks.isEmpty else { return [] }
 
-        // Ignore top 36px window titlebar chrome
-        let minY = windowBounds.minY + 34
-        let validYBlocks = blocks.filter { $0.frame.minY >= minY }
+        let chosenPool: [SpatialTextBlock]
+        if alreadyCropped {
+            chosenPool = blocks
+        } else {
+            let minY = windowBounds.minY + 34
+            let validYBlocks = blocks.filter { $0.frame.minY >= minY }
+            let mainPaneSplitX = windowBounds.minX + windowBounds.width * 0.25
+            let mainPaneBlocks = validYBlocks.filter { $0.frame.minX >= mainPaneSplitX }
+            chosenPool = (windowBounds.width > 540 && mainPaneBlocks.count >= 2) ? mainPaneBlocks : validYBlocks
+        }
 
-        // If window has a left sidebar (width > 540) and there are enough blocks in the right 74% main pane,
-        // prioritize the main conversation/thread pane over the left chat-list sidebar!
-        let mainPaneSplitX = windowBounds.minX + windowBounds.width * 0.25
-        let mainPaneBlocks = validYBlocks.filter { $0.frame.minX >= mainPaneSplitX }
-        let chosenPool = (windowBounds.width > 540 && mainPaneBlocks.count >= 2) ? mainPaneBlocks : validYBlocks
-
-        // Sort top-to-bottom by Y coordinate (merging adjacent fragments on the same horizontal row)
         let sorted = chosenPool.sorted { a, b in
-            if abs(a.frame.minY - b.frame.minY) < 10 {
+            if abs(a.frame.minY - b.frame.minY) < 12 {
                 return a.frame.minX < b.frame.minX
             }
             return a.frame.minY < b.frame.minY
@@ -480,11 +549,12 @@ final class AppContentFeedExtractor {
             if seenNorm.contains(norm) { continue }
             seenNorm.insert(norm)
 
-            // If on the same visual line (delta Y < 9px) as previous block and short, merge them
+            // Group vertically consecutive lines that belong to the same message bubble or response paragraph
             if let last = merged.last,
-               abs(block.frame.minY - last.frame.minY) < 9,
-               last.text.count < 90 {
-                let combinedText = "\(last.text) · \(block.text)"
+               (block.frame.minY - last.frame.maxY) < 22,
+               abs(block.frame.minX - last.frame.minX) < 65,
+               last.text.count < 115 {
+                let combinedText = "\(last.text) \(block.text)"
                 let unionFrame = last.frame.union(block.frame)
                 merged[merged.count - 1] = SpatialTextBlock(text: combinedText, frame: unionFrame, role: last.role)
             } else {
@@ -501,24 +571,22 @@ final class AppContentFeedExtractor {
         style: DigestPresentationStyle
     ) -> WindowLiveDigest {
         let fallbackContext = window.displayTitle
-        let mainPaneMidX = window.bounds.minX + window.bounds.width * 0.60
+        let mainPaneMidX = window.bounds.minX + window.bounds.width * 0.56
 
-        // Take the bottom-most (most recent) 6 lines for messaging & AI threads, or top-most 6 for browsers/finder
         let selectedBlocks: [SpatialTextBlock] = {
             switch style {
             case .messagingChat, .aiAgentThread:
-                return Array(blocks.suffix(6))
+                return Array(blocks.suffix(5))
             case .browserDocument, .mediaNowPlaying, .systemInspector:
-                return Array(blocks.prefix(6))
+                return Array(blocks.prefix(5))
             }
         }()
 
         if selectedBlocks.isEmpty {
-            // Provide informative fallback from window title & state if window is minimized or empty
             let fallbackLine = DigestFeedLine(
                 id: "\(window.id)-title",
                 speakerOrTag: style == .aiAgentThread ? "THREAD" : "WINDOW",
-                text: window.windowTitle.isEmpty ? "\(window.appName) is open and active" : window.windowTitle,
+                text: window.windowTitle.isEmpty ? "\(window.appName) — Live Window View Active" : window.windowTitle,
                 isIncomingOrAgent: true,
                 isHighlighted: true
             )
@@ -554,7 +622,7 @@ final class AppContentFeedExtractor {
                 }
             }()
 
-            let clippedText = blk.text.count > 165 ? String(blk.text.prefix(162)) + "…" : blk.text
+            let clippedText = blk.text.count > 175 ? String(blk.text.prefix(172)) + "…" : blk.text
             lines.append(
                 DigestFeedLine(
                     id: "\(window.id)-\(idx)-\(clippedText.prefix(16).hashValue)",
@@ -573,7 +641,7 @@ final class AppContentFeedExtractor {
             case .aiAgentThread:
                 return "LIVE THREAD (\(lines.count))"
             case .browserDocument:
-                return "LIVE DOM (\(lines.count))"
+                return "LIVE PAGE (\(lines.count))"
             case .mediaNowPlaying:
                 return "NOW PLAYING"
             case .systemInspector:

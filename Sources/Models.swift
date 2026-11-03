@@ -164,6 +164,38 @@ struct WindowLiveDigest: Equatable {
     let lines: [DigestFeedLine]
 }
 
+enum TileContentViewMode: String, CaseIterable, Identifiable, Codable {
+    case splitVisualAndFeed = "Split: Live Screen + Feed"
+    case liveSmartZoom = "Live Screen (Active Crop)"
+    case simplifiedReader = "Large-Text Reader Feed"
+
+    var id: String { rawValue }
+
+    var shortLabel: String {
+        switch self {
+        case .splitVisualAndFeed: return "Split View"
+        case .liveSmartZoom: return "Live Screen"
+        case .simplifiedReader: return "Text Feed"
+        }
+    }
+}
+
+enum ProgramSelectionMode: String, CaseIterable, Identifiable, Codable {
+    case automatic = "Automatic (Show Open Programs)"
+    case customDefaults = "Custom Defaults (Only Checked Programs)"
+
+    var id: String { rawValue }
+}
+
+struct SelectableProgramEntry: Identifiable, Equatable {
+    let id: String          // Normalized app name key (e.g. "signal", "chatgpt", "grok bot")
+    let displayName: String // e.g. "Signal", "ChatGPT (Dot)", "Grok Bot", "Antigravity"
+    let categoryLabel: String
+    let isCurrentlyOpen: Bool
+    let openWindowCount: Int
+    let appIcon: NSImage?
+}
+
 // MARK: - Monitored macOS Window
 
 struct MonitoredWindow: Identifiable, Equatable {
@@ -177,6 +209,7 @@ struct MonitoredWindow: Identifiable, Equatable {
     let platform: AgentPlatform?
     var appIcon: NSImage?
     var previewImage: NSImage?
+    var focusedContentImage: NSImage? = nil
     var liveDigest: WindowLiveDigest? = nil
 
     var displayTitle: String {

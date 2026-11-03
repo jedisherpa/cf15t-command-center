@@ -43,15 +43,45 @@ struct CommandCenterMainView: View {
                 currentGear: currentGearNumber
             )
 
-            // 2. Main Split Cockpit: Window Tiling Matrix (Left 67%) | AI Engines & Tasks (Right 33%)
+            // 2. Main Adjustable Split Cockpit: Window Tiling Matrix (Left) | Draggable Handle | AI Engines & Tasks (Right)
             GeometryReader { geo in
-                let leftWidth = max(620, floor((geo.size.width - 12) * 0.67))
-                HStack(spacing: 12) {
+                let totalW = geo.size.width
+                let leftWidth = viewModel.isRightPanelCollapsed
+                    ? totalW
+                    : max(540, min(totalW - 260, floor(totalW * CGFloat(viewModel.matrixWidthRatio))))
+
+                HStack(spacing: 6) {
                     WindowTilingArenaPanel(viewModel: viewModel, currentGear: currentGearNumber)
                         .frame(width: leftWidth)
 
-                    AgentAndTasksSidePanel(viewModel: viewModel)
-                        .frame(maxWidth: .infinity)
+                    if !viewModel.isRightPanelCollapsed {
+                        // Draggable Split Divider Handle
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color.white.opacity(0.10))
+                                .frame(width: 6)
+                            VStack(spacing: 3) {
+                                ForEach(0..<4, id: \.self) { _ in
+                                    Circle()
+                                        .fill(Color(red: 0.20, green: 0.88, blue: 1.0))
+                                        .frame(width: 3.5, height: 3.5)
+                                }
+                            }
+                        }
+                        .frame(width: 8)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 2)
+                                .onChanged { value in
+                                    let newX = max(540, min(totalW - 260, value.location.x + leftWidth))
+                                    viewModel.matrixWidthRatio = Double(newX / max(1, totalW))
+                                }
+                        )
+                        .help("Drag left or right to resize the Window Tiling Matrix vs AI Engines panel")
+
+                        AgentAndTasksSidePanel(viewModel: viewModel)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
             }
 
@@ -66,6 +96,9 @@ struct CommandCenterMainView: View {
         )
         .sheet(isPresented: $viewModel.isShowingVoiceSlotEditor) {
             VoiceSlotEditorSheet(viewModel: viewModel)
+        }
+        .sheet(isPresented: $viewModel.isShowingSettingsSheet) {
+            CommandCenterSettingsSheet(viewModel: viewModel)
         }
     }
 }
@@ -519,11 +552,11 @@ struct WindowTilingArenaPanel: View {
                     HStack(spacing: 4) {
                         Image(systemName: "rectangle.3.group.fill")
                             .font(.system(size: 11, weight: .black))
-                        Text("TILE MAC SCREEN")
+                        Text("TILE MAC")
                             .font(.system(size: 10, weight: .black, design: .monospaced))
                     }
                     .foregroundColor(.black)
-                    .padding(.horizontal, 11)
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 7)
                     .background(
                         LinearGradient(
@@ -536,23 +569,47 @@ struct WindowTilingArenaPanel: View {
                         )
                     )
                     .clipShape(CockpitChamferShape(topLeftCut: 6, topRightCut: 6, bottomRightCut: 6, bottomLeftCut: 6))
-                    .shadow(color: Color(red: 0.15, green: 1.0, blue: 0.58).opacity(0.5), radius: 6)
                 }
                 .buttonStyle(.plain)
 
+                // Prominent SETTINGS & CHOOSE PROGRAMS Button
                 Button(action: {
-                    viewModel.restoreOriginalWindowPositions()
+                    viewModel.isShowingSettingsSheet = true
                 }) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 12, weight: .black))
+                    HStack(spacing: 5) {
+                        Image(systemName: "gearshape.2.fill")
+                            .font(.system(size: 11, weight: .black))
+                        Text("SETTINGS & PROGRAMS")
+                            .font(.system(size: 10, weight: .black, design: .monospaced))
+                    }
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
+                    .background(Color(red: 1.0, green: 0.78, blue: 0.15))
+                    .clipShape(CockpitChamferShape(topLeftCut: 6, topRightCut: 6, bottomRightCut: 6, bottomLeftCut: 6))
+                    .shadow(color: Color(red: 1.0, green: 0.78, blue: 0.15).opacity(0.45), radius: 5)
+                }
+                .buttonStyle(.plain)
+
+                // Collapse / Expand Right Panel Button
+                Button(action: {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                        viewModel.isRightPanelCollapsed.toggle()
+                    }
+                }) {
+                    Image(systemName: viewModel.isRightPanelCollapsed ? "sidebar.right" : "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 11, weight: .black))
                         .foregroundColor(.white)
                         .padding(7)
                         .background(Color.white.opacity(0.10))
                         .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
                 }
                 .buttonStyle(.plain)
-                .help("Restore Original Window Positions")
+                .help(viewModel.isRightPanelCollapsed ? "Show Right AI Engines Panel" : "Expand Window Matrix to 100% Width")
             }
+
+            // Live Program Roster & Inline Adjustability Strip (Clearly shows what programs are on the matrix + view/size controls)
+            ProgramRosterAndAdjustmentStrip(viewModel: viewModel)
 
             // Interactive Center Stage + Perimeter Border Canvas
             GeometryReader { arenaGeo in
@@ -571,6 +628,137 @@ struct WindowTilingArenaPanel: View {
     }
 }
 
+struct ProgramRosterAndAdjustmentStrip: View {
+    @ObservedObject var viewModel: CommandCenterViewModel
+
+    var body: some View {
+        let openPrograms = viewModel.allSelectablePrograms.filter { $0.isCurrentlyOpen }
+
+        HStack(spacing: 6) {
+            // Label showing how many programs are displayed
+            Button(action: {
+                viewModel.isShowingSettingsSheet = true
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 10, weight: .black))
+                    Text("SHOWN (\(viewModel.visibleTiledWindows.count)):")
+                        .font(.system(size: 9.5, weight: .black, design: .monospaced))
+                }
+                .foregroundColor(Color(red: 1.0, green: 0.78, blue: 0.18))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 5)
+                .background(Color.white.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+            .buttonStyle(.plain)
+
+            // Scrollable row of Open Program Pills (click any program to show/hide it on the matrix!)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 5) {
+                    ForEach(openPrograms) { prog in
+                        let isShown = viewModel.isProgramDisplayed(prog.id)
+                        Button(action: {
+                            viewModel.toggleProgramDisplayed(prog.id)
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: isShown ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 9.5, weight: .black))
+                                    .foregroundColor(isShown ? Color(red: 0.15, green: 1.0, blue: 0.62) : .white.opacity(0.35))
+
+                                if let icon = prog.appIcon {
+                                    Image(nsImage: icon)
+                                        .resizable()
+                                        .frame(width: 13, height: 13)
+                                }
+
+                                Text(prog.displayName.uppercased())
+                                    .font(.system(size: 9, weight: .black, design: .monospaced))
+                                    .foregroundColor(isShown ? .white : .white.opacity(0.45))
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .fill(isShown ? Color(red: 0.10, green: 0.22, blue: 0.22) : Color.white.opacity(0.04))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .stroke(isShown ? Color(red: 0.15, green: 1.0, blue: 0.62).opacity(0.65) : Color.white.opacity(0.08), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            // Inline Visual Mode Selector (Split View | Live Screen | Text Feed)
+            HStack(spacing: 3) {
+                ForEach(TileContentViewMode.allCases) { mode in
+                    let isSel = (viewModel.tileContentViewMode == mode)
+                    Button(action: {
+                        viewModel.tileContentViewMode = mode
+                    }) {
+                        Text(mode.shortLabel.uppercased())
+                            .font(.system(size: 8.5, weight: .black, design: .monospaced))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .background(isSel ? Color(red: 0.20, green: 0.88, blue: 1.0) : Color.white.opacity(0.07))
+                            .foregroundColor(isSel ? .black : .white.opacity(0.8))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            // Inline Stage Size Adjustment
+            HStack(spacing: 4) {
+                Text("STAGE \(Int(viewModel.stageScaleFactor * 100))%")
+                    .font(.system(size: 8.5, weight: .black, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.75))
+                Slider(value: $viewModel.stageScaleFactor, in: 0.42...0.78)
+                    .frame(width: 68)
+            }
+
+            // Inline Text Size Zoom Buttons (A- / A+)
+            HStack(spacing: 2) {
+                Button(action: {
+                    viewModel.feedFontScale = max(0.85, viewModel.feedFontScale - 0.10)
+                }) {
+                    Text("A-")
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.08))
+                        .foregroundColor(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+
+                Button(action: {
+                    viewModel.feedFontScale = min(1.55, viewModel.feedFontScale + 0.10)
+                }) {
+                    Text("A+")
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.08))
+                        .foregroundColor(Color(red: 1.0, green: 0.78, blue: 0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.black.opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+}
+
 struct CenterStagePerimeterCanvas: View {
     @ObservedObject var viewModel: CommandCenterViewModel
     let canvasSize: CGSize
@@ -582,22 +770,37 @@ struct CenterStagePerimeterCanvas: View {
                 Image(systemName: "macwindow.on.rectangle")
                     .font(.system(size: 42))
                     .foregroundColor(Color(red: 0.20, green: 0.86, blue: 1.0))
-                Text("NO OPEN WINDOWS DETECTED")
+                Text("NO PROGRAMS SELECTED FOR DISPLAY")
                     .font(.system(size: 16, weight: .black, design: .monospaced))
                     .foregroundColor(.white)
-                Button(action: {
-                    viewModel.excludedWindowIDs.removeAll()
-                    viewModel.refreshAll(captureImages: true)
-                }) {
-                    Text("SCAN OPEN WINDOWS")
-                        .font(.system(size: 12, weight: .black, design: .monospaced))
-                        .foregroundColor(.black)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                        .background(Color(red: 0.20, green: 0.88, blue: 1.0))
-                        .clipShape(CockpitChamferShape(topLeftCut: 8, topRightCut: 8, bottomRightCut: 8, bottomLeftCut: 8))
+                HStack(spacing: 10) {
+                    Button(action: {
+                        viewModel.selectAllPrograms()
+                        viewModel.refreshAll(captureImages: true)
+                    }) {
+                        Text("SHOW ALL OPEN PROGRAMS")
+                            .font(.system(size: 12, weight: .black, design: .monospaced))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background(Color(red: 0.15, green: 1.0, blue: 0.62))
+                            .clipShape(CockpitChamferShape(topLeftCut: 8, topRightCut: 8, bottomRightCut: 8, bottomLeftCut: 8))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: {
+                        viewModel.isShowingSettingsSheet = true
+                    }) {
+                        Text("OPEN SETTINGS & CHOOSE PROGRAMS")
+                            .font(.system(size: 12, weight: .black, design: .monospaced))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background(Color(red: 1.0, green: 0.78, blue: 0.18))
+                            .clipShape(CockpitChamferShape(topLeftCut: 8, topRightCut: 8, bottomRightCut: 8, bottomLeftCut: 8))
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -613,7 +816,8 @@ struct CenterStagePerimeterCanvas: View {
                 count: orderedWindows.count,
                 canvas: rectCanvas,
                 mode: viewModel.tilingMode,
-                gap: 10
+                gap: 10,
+                stageScale: CGFloat(viewModel.stageScaleFactor)
             )
 
             let totalArea = max(1.0, Double(layoutRects.reduce(0.0) { $0 + ($1.width * $1.height) }))
@@ -642,6 +846,8 @@ struct CenterStagePerimeterCanvas: View {
                     InteractiveWindowTileCard(
                         node: node,
                         isCenterStage: isStage,
+                        viewMode: viewModel.tileContentViewMode,
+                        fontScale: viewModel.feedFontScale,
                         onTapPromote: {
                             viewModel.promoteWindowToStage(node.window)
                         },
@@ -649,7 +855,7 @@ struct CenterStagePerimeterCanvas: View {
                             WindowTilingEngine.shared.focusWindow(node.window)
                         },
                         onExclude: {
-                            viewModel.toggleWindowInclusion(node.window)
+                            viewModel.toggleProgramDisplayed(node.window.appName)
                         }
                     )
                     .frame(width: max(80, node.rect.width), height: max(60, node.rect.height))
@@ -657,13 +863,15 @@ struct CenterStagePerimeterCanvas: View {
                     .animation(.spring(response: 0.32, dampingFraction: 0.80), value: node.rect)
                 }
 
-                // Real-Time Causal Telemetry Overlay (ONLY draws real Voice & Active CPU flows — zero fake dots!)
-                MeaningfulGeometryOverlay(
-                    nodes: telemetryNodes,
-                    mode: viewModel.tilingMode,
-                    canvasSize: canvasSize,
-                    micVolume: viewModel.systemMicVolume
-                )
+                // Optional Floating Flow Lines (OFF by default so orange dotted CPU lines don't obscure windows!)
+                if viewModel.showFloatingFlowLines {
+                    MeaningfulGeometryOverlay(
+                        nodes: telemetryNodes,
+                        mode: viewModel.tilingMode,
+                        canvasSize: canvasSize,
+                        micVolume: viewModel.systemMicVolume
+                    )
+                }
             }
             .frame(width: canvasSize.width, height: canvasSize.height)
         }
@@ -673,6 +881,8 @@ struct CenterStagePerimeterCanvas: View {
 struct InteractiveWindowTileCard: View {
     let node: WindowTelemetryNode
     let isCenterStage: Bool
+    let viewMode: TileContentViewMode
+    let fontScale: Double
     let onTapPromote: () -> Void
     let onFocusOnly: () -> Void
     let onExclude: () -> Void
@@ -705,46 +915,27 @@ struct InteractiveWindowTileCard: View {
         let cut: CGFloat = isCenterStage ? 18 : 11
         let tileShape = CockpitChamferShape(topLeftCut: cut, topRightCut: cut, bottomRightCut: cut, bottomLeftCut: cut)
         let roleBadge = isCenterStage
-            ? String(format: "★ #1 MAIN STAGE · %.0f%% AREA", node.areaPercent)
-            : String(format: "#%d · %.0f%% AREA · TAP TO EXPAND", node.rankIndex + 1, node.areaPercent)
+            ? String(format: "★ #1 STAGE · %.0f%%", node.areaPercent)
+            : String(format: "#%d · %.0f%%", node.rankIndex + 1, node.areaPercent)
 
         Button(action: onTapPromote) {
             ZStack(alignment: .bottomLeading) {
-                // Background: Subtle Darkened Window Watermark + High-Contrast Simplified Live App Display
+                // High-Clarity Program Visual (Split Live Cropped Screen + Feed, Live Screen Only, or Reader Feed)
                 GeometryReader { cardGeo in
                     ZStack {
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.05, green: 0.07, blue: 0.12),
-                                Color(red: 0.03, green: 0.05, blue: 0.09)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+                        Color(red: 0.04, green: 0.06, blue: 0.10)
 
-                        if let preview = window.previewImage,
-                           preview.size.width > 4,
-                           preview.size.height > 4,
-                           cardGeo.size.width > 10,
-                           cardGeo.size.height > 10 {
-                            Image(nsImage: preview)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: cardGeo.size.width, height: cardGeo.size.height)
-                                .clipped()
-                                .opacity(0.15)
-                        }
-
-                        // Super-Simplified Live App Display (Messages / Response Thread / Active Items)
                         SimplifiedAppContentView(
                             window: window,
                             accent: accent,
                             isCenterStage: isCenterStage,
+                            viewMode: viewMode,
+                            fontScale: fontScale,
                             cardSize: cardGeo.size
                         )
-                        .padding(.top, isCenterStage ? 34 : 28)
-                        .padding(.bottom, isCenterStage ? 30 : 24)
-                        .padding(.horizontal, isCenterStage ? 12 : 8)
+                        .padding(.top, isCenterStage ? 32 : 26)
+                        .padding(.bottom, isCenterStage ? 26 : 22)
+                        .padding(.horizontal, isCenterStage ? 8 : 5)
                     }
                 }
 
@@ -755,12 +946,12 @@ struct InteractiveWindowTileCard: View {
                         lineWidth: 3.0,
                         length: 28
                     )
-                    .padding(8)
+                    .padding(6)
                 }
 
                 // Top & Bottom Telemetry Overlay Bars
                 VStack(alignment: .leading, spacing: 0) {
-                    // Top Bar: Rank + Area % + App Name + Voice Status + Boost Button
+                    // Top Bar: Rank + Program Name + Voice Status + Boost Button
                     HStack(spacing: 6) {
                         Text(roleBadge)
                             .font(.system(size: isCenterStage ? 10 : 8, weight: .black, design: .monospaced))
@@ -769,6 +960,12 @@ struct InteractiveWindowTileCard: View {
                             .background(isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62) : accent)
                             .foregroundColor(.black)
                             .lineLimit(1)
+
+                        if let icon = window.appIcon {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .frame(width: isCenterStage ? 16 : 13, height: isCenterStage ? 16 : 13)
+                        }
 
                         Text(window.appName.uppercased())
                             .font(.system(size: isCenterStage ? 13 : 10, weight: .black, design: .monospaced))
@@ -790,7 +987,7 @@ struct InteractiveWindowTileCard: View {
                                 .font(.system(size: 8.5, weight: .black, design: .monospaced))
                             }
                             .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
+                            .padding(.vertical, 2.5)
                             .background(
                                 node.isMicLive
                                     ? Color(red: 0.15, green: 1.0, blue: 0.58)
@@ -817,7 +1014,7 @@ struct InteractiveWindowTileCard: View {
                         }
 
                         Button(action: onExclude) {
-                            Image(systemName: "xmark")
+                            Image(systemName: "eye.slash.fill")
                                 .font(.system(size: 9, weight: .black))
                                 .foregroundColor(.white.opacity(0.75))
                                 .padding(5)
@@ -825,10 +1022,11 @@ struct InteractiveWindowTileCard: View {
                                 .clipShape(Circle())
                         }
                         .buttonStyle(.plain)
+                        .help("Hide \(window.appName) from Matrix")
                     }
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.80))
+                    .padding(.vertical, 5)
+                    .background(Color.black.opacity(0.88))
 
                     Spacer()
 
@@ -841,16 +1039,12 @@ struct InteractiveWindowTileCard: View {
                                 .padding(.vertical, 2)
                                 .background(plat.accentColor)
                                 .foregroundColor(.black)
-                        } else if !window.windowTitle.isEmpty {
-                            Text(window.windowTitle)
-                                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.80))
-                                .lineLimit(1)
-                        } else {
-                            Text("PID \(window.ownerPID)")
-                                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.65))
                         }
+
+                        Text(window.displayTitle)
+                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.88))
+                            .lineLimit(1)
 
                         Spacer()
 
@@ -871,16 +1065,16 @@ struct InteractiveWindowTileCard: View {
                                 )
                         }
 
-                        Text("\(Int(window.bounds.width))×\(Int(window.bounds.height)) px")
-                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                            .padding(.horizontal, 6)
+                        Text("\(Int(window.bounds.width))×\(Int(window.bounds.height))")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 5)
                             .padding(.vertical, 2)
                             .background(Color.black.opacity(0.72))
                             .foregroundColor(Color(red: 0.25, green: 0.88, blue: 1.0))
                     }
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.black.opacity(0.65))
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.82))
                 }
             }
             .clipShape(tileShape)
@@ -901,99 +1095,159 @@ struct InteractiveWindowTileCard: View {
     }
 }
 
-// MARK: - 2B. Super-Simplified Live App Display (Messages / AI Response Threads / Active Content)
+// MARK: - 2B. High-Clarity Program Visual (100% Bright Active-Crop Live Screen + Large-Text Feed Drawer)
 
 struct SimplifiedAppContentView: View {
     let window: MonitoredWindow
     let accent: Color
     let isCenterStage: Bool
+    let viewMode: TileContentViewMode
+    let fontScale: Double
     let cardSize: CGSize
 
     private var digest: WindowLiveDigest {
         window.liveDigest ?? AppContentFeedExtractor.shared.extractLiveDigest(for: window)
     }
 
+    private var activeVisualImage: NSImage? {
+        window.focusedContentImage ?? window.previewImage
+    }
+
     private var maxVisibleLines: Int {
-        if isCenterStage {
-            return 5
-        }
-        if cardSize.height < 130 {
-            return 2
-        } else if cardSize.height < 195 {
-            return 3
-        } else {
-            return 4
+        switch viewMode {
+        case .simplifiedReader:
+            return isCenterStage ? 6 : (cardSize.height < 140 ? 2 : 4)
+        case .splitVisualAndFeed:
+            return isCenterStage ? 4 : (cardSize.height < 155 ? 2 : 3)
+        case .liveSmartZoom:
+            return 1
         }
     }
 
     var body: some View {
         let visibleLines = Array(digest.lines.suffix(maxVisibleLines))
-        let showSideMiniPreview = isCenterStage && cardSize.width > 520 && window.previewImage != nil
 
-        HStack(spacing: 10) {
-            // Left / Main Column: Simplified High-Contrast Live Feed (Messages or Response Thread)
-            VStack(alignment: .leading, spacing: isCenterStage ? 6 : 4) {
-                // Context Header Bar (Active Contact / Thread Title + Live Feed Type Badge)
-                HStack(spacing: 6) {
-                    if let icon = window.appIcon {
-                        Image(nsImage: icon)
-                            .resizable()
-                            .frame(width: isCenterStage ? 18 : 14, height: isCenterStage ? 18 : 14)
-                    }
-
-                    Text(digest.contextTitle.uppercased())
-                        .font(.system(size: isCenterStage ? 11 : 9, weight: .black, design: .monospaced))
-                        .foregroundColor(accent)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 4)
-
-                    Text(digest.statusBadge)
-                        .font(.system(size: isCenterStage ? 8.5 : 7.5, weight: .black, design: .monospaced))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(accent.opacity(0.22))
-                        .foregroundColor(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+        switch viewMode {
+        case .liveSmartZoom:
+            // 100% Bright Smart-Cropped Live Window View + Bottom Latest Line Banner
+            ZStack(alignment: .bottomLeading) {
+                liveViewportView
+                if let last = visibleLines.last {
+                    SimplifiedDigestLineBubble(
+                        line: last,
+                        style: digest.style,
+                        accent: accent,
+                        isCenterStage: isCenterStage,
+                        fontScale: fontScale
+                    )
+                    .padding(6)
                 }
-                .padding(.bottom, 1)
+            }
 
-                // Simplified Message Bubbles / Response Thread Lines
-                VStack(alignment: .leading, spacing: isCenterStage ? 5 : 3.5) {
-                    ForEach(visibleLines) { line in
-                        SimplifiedDigestLineBubble(
-                            line: line,
-                            style: digest.style,
-                            accent: accent,
-                            isCenterStage: isCenterStage
-                        )
+        case .simplifiedReader:
+            // 100% High-Contrast Large-Text Reader Feed
+            feedColumnView(lines: visibleLines)
+
+        case .splitVisualAndFeed:
+            // Default Hybrid View:
+            // - In Center Stage (or wide cards): Left 56% = 100% Bright Zoomed Live Screen | Right 44% = High-Contrast Live Feed
+            // - In Border Tiles: Top 55% = 100% Bright Zoomed Live Screen | Bottom 45% = High-Contrast Latest Messages/Thread
+            if activeVisualImage != nil {
+                if isCenterStage || cardSize.width > 460 {
+                    HStack(spacing: 8) {
+                        liveViewportView
+                            .frame(width: max(160, cardSize.width * 0.55))
+
+                        feedColumnView(lines: visibleLines)
+                            .frame(maxWidth: .infinity)
+                    }
+                } else {
+                    VStack(spacing: 5) {
+                        liveViewportView
+                            .frame(height: max(54, (cardSize.height - 50) * 0.54))
+
+                        feedColumnView(lines: visibleLines)
+                            .frame(maxHeight: .infinity)
                     }
                 }
+            } else {
+                feedColumnView(lines: visibleLines)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var liveViewportView: some View {
+        if let img = activeVisualImage, img.size.width > 4, img.size.height > 4 {
+            GeometryReader { geo in
+                Image(nsImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomTrailing)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(accent.opacity(0.55), lineWidth: 1.2)
+                    )
+                    .overlay(alignment: .topLeading) {
+                        Text("LIVE VIEW")
+                            .font(.system(size: 7.5, weight: .black, design: .monospaced))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.black.opacity(0.78))
+                            .foregroundColor(Color(red: 0.15, green: 1.0, blue: 0.62))
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .padding(4)
+                    }
+            }
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(accent.opacity(0.15))
+                if let icon = window.appIcon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 44, height: 44)
+                }
+            }
+        }
+    }
+
+    private func feedColumnView(lines: [DigestFeedLine]) -> some View {
+        VStack(alignment: .leading, spacing: isCenterStage ? 5 : 3) {
+            HStack(spacing: 5) {
+                Text(digest.statusBadge)
+                    .font(.system(size: CGFloat((isCenterStage ? 9.0 : 7.5) * fontScale), weight: .black, design: .monospaced))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1.5)
+                    .background(accent.opacity(0.28))
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                Text(digest.contextTitle)
+                    .font(.system(size: CGFloat((isCenterStage ? 10.0 : 8.5) * fontScale), weight: .bold, design: .monospaced))
+                    .foregroundColor(accent)
+                    .lineLimit(1)
 
                 Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Right Mini-Monitor Thumbnail inside #1 Main Stage so you see both Live Text AND Window Visual
-            if showSideMiniPreview, let preview = window.previewImage {
-                VStack(spacing: 4) {
-                    Image(nsImage: preview)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: cardSize.width * 0.33, maxHeight: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(accent.opacity(0.55), lineWidth: 1.2)
-                        )
-
-                    Text("LIVE WINDOW VIEW")
-                        .font(.system(size: 7.5, weight: .black, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.55))
+            VStack(alignment: .leading, spacing: isCenterStage ? 4.5 : 3) {
+                ForEach(lines) { line in
+                    SimplifiedDigestLineBubble(
+                        line: line,
+                        style: digest.style,
+                        accent: accent,
+                        isCenterStage: isCenterStage,
+                        fontScale: fontScale
+                    )
                 }
-                .frame(width: cardSize.width * 0.33)
             }
+
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -1002,6 +1256,7 @@ struct SimplifiedDigestLineBubble: View {
     let style: DigestPresentationStyle
     let accent: Color
     let isCenterStage: Bool
+    let fontScale: Double
 
     var body: some View {
         let isUserOrOutgoing = !line.isIncomingOrAgent || (line.speakerOrTag == "YOU")
@@ -1019,21 +1274,16 @@ struct SimplifiedDigestLineBubble: View {
             }
         }()
 
-        HStack(alignment: .top, spacing: 6) {
-            if isUserOrOutgoing && style == .messagingChat {
-                Spacer(minLength: isCenterStage ? 28 : 12)
-            }
-
-            // Left Accent Indicator Bar
+        HStack(alignment: .top, spacing: 5) {
             RoundedRectangle(cornerRadius: 1.5)
                 .fill(badgeColor)
                 .frame(width: 3)
 
-            VStack(alignment: .leading, spacing: 1.5) {
-                HStack(spacing: 5) {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 4) {
                     if let speaker = line.speakerOrTag {
                         Text(speaker)
-                            .font(.system(size: isCenterStage ? 8.5 : 7.5, weight: .black, design: .monospaced))
+                            .font(.system(size: CGFloat((isCenterStage ? 8.5 : 7.5) * fontScale), weight: .black, design: .monospaced))
                             .foregroundColor(badgeColor)
                     }
 
@@ -1046,31 +1296,31 @@ struct SimplifiedDigestLineBubble: View {
 
                 Text(line.text)
                     .font(.system(
-                        size: isCenterStage ? 11.5 : 9.5,
+                        size: CGFloat((isCenterStage ? 11.5 : 9.5) * fontScale),
                         weight: line.isHighlighted ? .bold : .medium,
                         design: style == .aiAgentThread ? .monospaced : .default
                     ))
-                    .foregroundColor(line.isHighlighted ? .white : .white.opacity(0.88))
-                    .lineLimit(isCenterStage ? 2 : 2)
+                    .foregroundColor(line.isHighlighted ? .white : .white.opacity(0.92))
+                    .lineLimit(isCenterStage ? 3 : 2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, isCenterStage ? 8 : 6)
-            .padding(.vertical, isCenterStage ? 5 : 3.5)
+            .padding(.horizontal, isCenterStage ? 7 : 5)
+            .padding(.vertical, isCenterStage ? 4.5 : 3)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 5)
                     .fill(
                         isUserOrOutgoing
-                            ? Color(red: 0.16, green: 0.14, blue: 0.08).opacity(0.90)
+                            ? Color(red: 0.18, green: 0.15, blue: 0.08).opacity(0.94)
                             : (line.isHighlighted
-                                ? Color(red: 0.07, green: 0.16, blue: 0.18).opacity(0.92)
-                                : Color.black.opacity(0.75))
+                                ? Color(red: 0.07, green: 0.17, blue: 0.19).opacity(0.95)
+                                : Color.black.opacity(0.84))
                     )
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 5)
                     .stroke(
-                        line.isHighlighted ? badgeColor.opacity(0.80) : Color.white.opacity(0.10),
+                        line.isHighlighted ? badgeColor.opacity(0.85) : Color.white.opacity(0.12),
                         lineWidth: line.isHighlighted ? 1.2 : 0.7
                     )
             )
@@ -1427,6 +1677,22 @@ struct BottomStatusStrip: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            Button(action: {
+                viewModel.isShowingSettingsSheet = true
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "gearshape.2.fill")
+                    Text("SETTINGS")
+                }
+                .font(.system(size: 10, weight: .black, design: .monospaced))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color(red: 1.0, green: 0.78, blue: 0.15))
+                .foregroundColor(.black)
+                .clipShape(stripShape)
+            }
+            .buttonStyle(.plain)
 
             Button(action: {
                 viewModel.snapPanelToCF15T()
