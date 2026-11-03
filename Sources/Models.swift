@@ -52,7 +52,7 @@ enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
         case .grokBot:
             return ["/Applications/Grok Bot.app"]
         case .dot:
-            return ["/Applications/Dot.app", "/Applications/Claude.app", "/Applications/ChatGPT.app"]
+            return ["/Applications/ChatGPT.app"]
         case .claude:
             return ["/Applications/Claude.app"]
         case .codex:
@@ -75,9 +75,9 @@ enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
     var processMatchKeywords: [String] {
         switch self {
         case .grokBot: return ["grok bot", "com.anysphere.sand", "grokbot"]
-        case .dot: return ["dot.app", "new.computer", "dot "]
+        case .dot: return ["chatgpt", "com.openai.codex", "com.openai.chat", "dot"]
         case .claude: return ["claude", "anthropic"]
-        case .codex: return ["codex"]
+        case .codex: return ["codex project picker", "codex"]
         case .antigravity: return ["antigravity", "language_server_macos"]
         case .chatGPT: return ["chatgpt", "com.openai.chat"]
         case .cubedCode: return ["cubed code"]
@@ -217,10 +217,10 @@ struct VoiceAssistantConfig: Identifiable, Codable, Equatable {
     static let defaultSlotB = VoiceAssistantConfig(
         id: "slotB",
         displayName: "Dot",
-        subtitle: "Secondary Voice / Assistant",
-        targetAppName: "Claude",
-        appBundlePath: "/Applications/Claude.app",
-        urlSchemeOrWebURL: "https://new.computer",
+        subtitle: "ChatGPT Agent",
+        targetAppName: "ChatGPT",
+        appBundlePath: "/Applications/ChatGPT.app",
+        urlSchemeOrWebURL: "codex://",
         micShortcut: .spaceBar,
         isMicEnabled: false,
         accentHex: "#33DBA6"

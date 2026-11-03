@@ -6,9 +6,9 @@ struct VoiceSlotEditorSheet: View {
 
     private let quickPresets: [(name: String, appName: String, path: String, url: String)] = [
         ("Grok Bot", "Grok Bot", "/Applications/Grok Bot.app", "grokbot://"),
-        ("Dot", "Dot", "/Applications/Dot.app", "https://new.computer"),
+        ("Dot", "ChatGPT", "/Applications/ChatGPT.app", "codex://"),
         ("Claude", "Claude", "/Applications/Claude.app", "claude://"),
-        ("ChatGPT", "ChatGPT", "/Applications/ChatGPT.app", "chatgpt://"),
+        ("ChatGPT", "ChatGPT", "/Applications/ChatGPT.app", "codex://"),
         ("Codex", "Codex Project Picker", "/Applications/Codex Project Picker.app", ""),
         ("Antigravity", "Antigravity", "/Applications/Antigravity.app", ""),
         ("Prism Live", "Prism GT Chat Live", "/Applications/Prism GT Chat Live.app", ""),

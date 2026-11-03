@@ -178,16 +178,22 @@ final class CoreAudioMicManager {
         }
     }
 
-    // MARK: - Send App-Level Voice Toggle Shortcut
+    // MARK: - Send App-Level Voice Toggle Shortcut or Click In-App AX Mic Button
 
     func triggerVoiceShortcut(for slot: VoiceAssistantConfig, activateAppFirst: Bool) {
         if activateAppFirst {
             activateOrLaunchAssistant(slot)
         }
-        guard let keyCode = slot.micShortcut.keyCode else { return }
-        let flags = slot.micShortcut.modifiers
 
         DispatchQueue.main.asyncAfter(deadline: .now() + (activateAppFirst ? 0.16 : 0.02)) {
+            // 1. Try clicking an explicit in-app Microphone/Mute button via Accessibility if available
+            if self.tryClickInAppMicButton(for: slot) {
+                return
+            }
+
+            // 2. Fallback to keyboard shortcut
+            guard let keyCode = slot.micShortcut.keyCode else { return }
+            let flags = slot.micShortcut.modifiers
             guard let src = CGEventSource(stateID: .hidSystemState) else { return }
             if let keyDown = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: true),
                let keyUp = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: false) {
@@ -197,6 +203,69 @@ final class CoreAudioMicManager {
                 keyUp.post(tap: .cghidEventTap)
             }
         }
+    }
+
+    private func tryClickInAppMicButton(for slot: VoiceAssistantConfig) -> Bool {
+        guard AXIsProcessTrusted() else { return false }
+        let runningApps = NSWorkspace.shared.runningApplications
+        guard let match = runningApps.first(where: { app in
+            guard let name = app.localizedName else { return false }
+            return name.localizedCaseInsensitiveContains(slot.targetAppName) ||
+                   name.localizedCaseInsensitiveContains(slot.displayName) ||
+                   (app.bundleURL?.path.lowercased() == slot.appBundlePath.lowercased())
+        }) else {
+            return false
+        }
+
+        let axApp = AXUIElementCreateApplication(match.processIdentifier)
+        var windowsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let windows = windowsRef as? [AXUIElement] else {
+            return false
+        }
+
+        for win in windows {
+            if let micButton = findMicButton(in: win, depth: 0) {
+                AXUIElementPerformAction(micButton, kAXPressAction as CFString)
+                return true
+            }
+        }
+        return false
+    }
+
+    private func findMicButton(in element: AXUIElement, depth: Int) -> AXUIElement? {
+        guard depth <= 7 else { return nil }
+
+        var roleRef: CFTypeRef?
+        let role = (AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success)
+            ? (roleRef as? String ?? "")
+            : ""
+
+        if role == kAXButtonRole as String || role == kAXCheckBoxRole as String || role == kAXRadioButtonRole as String {
+            var titleRef: CFTypeRef?
+            var descRef: CFTypeRef?
+            var helpRef: CFTypeRef?
+            _ = AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
+            _ = AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &descRef)
+            _ = AXUIElementCopyAttributeValue(element, kAXHelpAttribute as CFString, &helpRef)
+
+            let combined = "\(titleRef as? String ?? "") \(descRef as? String ?? "") \(helpRef as? String ?? "")".lowercased()
+            let micKeywords = ["microphone", "mute", "unmute", "voice", "dictat", "start talking", "stop talking", "mic"]
+            if micKeywords.contains(where: { combined.contains($0) }) {
+                return element
+            }
+        }
+
+        var childrenRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
+           let children = childrenRef as? [AXUIElement] {
+            for child in children {
+                if let found = findMicButton(in: child, depth: depth + 1) {
+                    return found
+                }
+            }
+        }
+        return nil
     }
 
     @discardableResult

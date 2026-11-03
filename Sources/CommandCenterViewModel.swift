@@ -369,7 +369,12 @@ final class CommandCenterViewModel: ObservableObject {
         }
         if let dataB = defaults.data(forKey: defaultsKeySlotB),
            let decodedB = try? JSONDecoder().decode(VoiceAssistantConfig.self, from: dataB) {
-            slotB = decodedB
+            if decodedB.displayName == "Dot" && decodedB.targetAppName == "Claude" {
+                slotB = .defaultSlotB
+                saveVoiceConfigs()
+            } else {
+                slotB = decodedB
+            }
         }
     }
 
