@@ -236,6 +236,9 @@ final class WindowTilingEngine {
         case .centerStageBorder:
             rawRects = computeCenterStageWithPerimeterBorder(count: count, area: insetCanvas, gap: gap)
 
+        case .goldenFibonacciSpiral:
+            rawRects = computeGoldenFibonacciSpiral(count: count, area: insetCanvas, gap: gap)
+
         case .leftStagePerimeter:
             rawRects = computeLeftStageWithRightBottomBorder(count: count, area: insetCanvas, gap: gap)
 
@@ -247,6 +250,78 @@ final class WindowTilingEngine {
         }
 
         return rawRects.map { sanitizeRect($0) }
+    }
+
+    /// Recursive Golden Ratio (φ = (1 + √5)/2 ≈ 1.6180339887) Whirling Rectangle Subdivision.
+    /// Partitions the 2D screen manifold along a self-similar logarithmic spiral r(θ) = a·φ^(2θ/π).
+    private func computeGoldenFibonacciSpiral(count: Int, area: CGRect, gap: CGFloat) -> [CGRect] {
+        let invPhi: CGFloat = 0.6180339887498949 // (√5 - 1) / 2
+        var rects: [CGRect] = []
+        var remainder = area
+
+        // Spiral up to 5 golden subdivisions; if more windows remain, subdivide the final chamber evenly
+        let maxSpiralSteps = min(count - 1, 5)
+
+        for step in 0..<maxSpiralSteps {
+            let phase = step % 4
+            switch phase {
+            case 0: // Left Golden Chamber (61.8% width)
+                let w = max(90, floor((remainder.width - gap) * invPhi))
+                let chamber = CGRect(x: remainder.minX, y: remainder.minY, width: w, height: remainder.height)
+                rects.append(chamber)
+                remainder = CGRect(
+                    x: remainder.minX + w + gap,
+                    y: remainder.minY,
+                    width: max(80, remainder.width - w - gap),
+                    height: remainder.height
+                )
+
+            case 1: // Top Golden Chamber (61.8% height)
+                let h = max(70, floor((remainder.height - gap) * invPhi))
+                let chamber = CGRect(x: remainder.minX, y: remainder.minY, width: remainder.width, height: h)
+                rects.append(chamber)
+                remainder = CGRect(
+                    x: remainder.minX,
+                    y: remainder.minY + h + gap,
+                    width: remainder.width,
+                    height: max(70, remainder.height - h - gap)
+                )
+
+            case 2: // Right Golden Chamber (61.8% width from right)
+                let w = max(90, floor((remainder.width - gap) * invPhi))
+                let remW = max(80, remainder.width - w - gap)
+                let chamber = CGRect(
+                    x: remainder.minX + remW + gap,
+                    y: remainder.minY,
+                    width: w,
+                    height: remainder.height
+                )
+                rects.append(chamber)
+                remainder = CGRect(x: remainder.minX, y: remainder.minY, width: remW, height: remainder.height)
+
+            default: // Bottom Golden Chamber (61.8% height from bottom)
+                let h = max(70, floor((remainder.height - gap) * invPhi))
+                let remH = max(70, remainder.height - h - gap)
+                let chamber = CGRect(
+                    x: remainder.minX,
+                    y: remainder.minY + remH + gap,
+                    width: remainder.width,
+                    height: h
+                )
+                rects.append(chamber)
+                remainder = CGRect(x: remainder.minX, y: remainder.minY, width: remainder.width, height: remH)
+            }
+        }
+
+        let leftOver = count - rects.count
+        if leftOver == 1 {
+            rects.append(remainder)
+        } else if leftOver > 1 {
+            let subGrid = computeEqualGrid(count: leftOver, area: remainder, gap: max(6, gap * 0.7))
+            rects.append(contentsOf: subGrid)
+        }
+
+        return rects
     }
 
     private func sanitizeRect(_ r: CGRect) -> CGRect {

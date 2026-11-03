@@ -13,22 +13,23 @@ struct CommandCenterMainView: View {
     private var currentGearNumber: Int {
         switch viewModel.tilingMode {
         case .centerStageBorder: return 1
-        case .leftStagePerimeter: return 2
-        case .equalSimultaneousGrid: return 3
-        case .dualVoiceSplit: return 4
+        case .goldenFibonacciSpiral: return 2
+        case .leftStagePerimeter: return 3
+        case .equalSimultaneousGrid: return 4
+        case .dualVoiceSplit: return 5
         }
     }
 
     var body: some View {
         VStack(spacing: 10) {
-            // 0. Top F1 / GT3 Shift-Light LED Rev Strip
+            // 0. Top F1 / GT3 Shift-Light & Differential Geometry Invariant Strip
             ShiftLightRevStrip(
                 totalCPULoad: totalSystemCPULoad,
                 isAnyMicLive: viewModel.slotA.isMicEnabled || viewModel.slotB.isMicEnabled,
                 isTouchingScreen: viewModel.sisIsTouching
             )
 
-            // 1. Supercar Instrument Cluster & Pit-Radio Switchboard (Grok Bot <-> Dot + Twin Gauges)
+            // 1. Supercar Instrument Cluster & Pit-Radio Switchboard (Grok Bot <-> Dot + Twin Gauges + Hopf Orb)
             TopVoiceAndSystemBar(
                 viewModel: viewModel,
                 totalCPULoad: totalSystemCPULoad,
@@ -54,44 +55,7 @@ struct CommandCenterMainView: View {
         .padding(.vertical, 10)
         .background(CockpitCarbonBackground())
         .overlay(
-            // Live Multi-Touch Racing HUD Crosshair Reticle
-            GeometryReader { fullGeo in
-                ZStack {
-                    ForEach(viewModel.sisActiveContacts) { contact in
-                        let cx = contact.normalizedX * fullGeo.size.width
-                        let cy = contact.normalizedY * fullGeo.size.height
-                        ZStack {
-                            HUDCornerBrackets(
-                                color: Color(red: 0.15, green: 1.0, blue: 0.62),
-                                lineWidth: 2.5,
-                                length: 16
-                            )
-                            .frame(width: 76, height: 76)
-
-                            Circle()
-                                .stroke(
-                                    Color(red: 1.0, green: 0.42, blue: 0.15),
-                                    style: StrokeStyle(lineWidth: 2.5, dash: [8, 5])
-                                )
-                                .frame(width: 54, height: 54)
-
-                            Circle()
-                                .fill(Color(red: 0.15, green: 1.0, blue: 0.62).opacity(0.28))
-                                .frame(width: 30, height: 30)
-
-                            Text(String(format: "T%d %.0f:%.0f", contact.id, contact.normalizedX * 100, contact.normalizedY * 100))
-                                .font(.system(size: 9, weight: .black, design: .monospaced))
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(Color.black.opacity(0.85))
-                                .foregroundColor(Color(red: 0.15, green: 1.0, blue: 0.62))
-                                .offset(y: 48)
-                        }
-                        .position(x: cx, y: cy)
-                    }
-                }
-            }
-            .allowsHitTesting(false)
+            GeometricTouchSimplexOverlay(contacts: viewModel.sisActiveContacts)
         )
         .sheet(isPresented: $viewModel.isShowingVoiceSlotEditor) {
             VoiceSlotEditorSheet(viewModel: viewModel)
@@ -157,15 +121,22 @@ struct CenterTelemetryCluster: View {
     let currentGear: Int
 
     var body: some View {
-        HStack(spacing: 10) {
-            // Left Tachometer: AI Engine RPM
+        HStack(spacing: 8) {
+            // Left Tachometer: AI Engine RPM + Rhodonea Rose Curve
             CockpitArcGaugeView(
                 title: "ECU LOAD",
                 valueText: String(format: "%.0f", min(99, totalCPULoad)),
                 unitText: "% RPM",
                 progress: min(1.0, max(0.08, totalCPULoad / 80.0)),
                 accentColor: Color(red: 0.18, green: 0.85, blue: 1.0),
-                redlineColor: Color(red: 1.0, green: 0.25, blue: 0.20)
+                redlineColor: Color(red: 1.0, green: 0.25, blue: 0.20),
+                harmonicK: 3.0
+            )
+
+            // Live 4D Stereographic Clifford Torus / Hopf Fibration Phase-Space Orb
+            CliffordHopfAttractorOrb(
+                cpuLoad: totalCPULoad,
+                isMicLive: viewModel.slotA.isMicEnabled || viewModel.slotB.isMicEnabled
             )
 
             // Center Overtake / Comms Swap Button + Digital Gear Indicator
@@ -174,22 +145,22 @@ struct CenterTelemetryCluster: View {
             }) {
                 VStack(spacing: 3) {
                     HStack(spacing: 5) {
-                        Text("GEAR")
-                            .font(.system(size: 9, weight: .black, design: .monospaced))
+                        Text("MANIFOLD")
+                            .font(.system(size: 8.5, weight: .black, design: .monospaced))
                             .foregroundColor(.white.opacity(0.6))
-                        Text("\(currentGear)")
-                            .font(.system(size: 16, weight: .black, design: .monospaced))
+                        Text("G\(currentGear)")
+                            .font(.system(size: 15, weight: .black, design: .monospaced))
                             .foregroundColor(Color(red: 1.0, green: 0.80, blue: 0.15))
                     }
 
-                    HStack(spacing: 5) {
+                    HStack(spacing: 4) {
                         Image(systemName: "bolt.horizontal.circle.fill")
-                            .font(.system(size: 16, weight: .black))
+                            .font(.system(size: 15, weight: .black))
                         Text("OVERTAKE")
-                            .font(.system(size: 13, weight: .black, design: .monospaced))
+                            .font(.system(size: 12, weight: .black, design: .monospaced))
                     }
                     .foregroundColor(.black)
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     .background(
                         LinearGradient(
@@ -208,21 +179,22 @@ struct CenterTelemetryCluster: View {
                         .foregroundColor(Color(red: 0.20, green: 0.95, blue: 0.70))
                         .lineLimit(1)
                 }
-                .frame(width: 142, height: 78)
+                .frame(width: 132, height: 78)
             }
             .buttonStyle(.plain)
 
-            // Right Boost Gauge: Mic Gain PSI
+            // Right Boost Gauge: Mic Gain PSI + Rhodonea Harmonics
             CockpitArcGaugeView(
                 title: "MIC GAIN",
                 valueText: viewModel.systemMicMuted ? "MUTE" : "\(Int(viewModel.systemMicVolume * 100))",
                 unitText: viewModel.systemMicMuted ? "0 PSI" : "% BOOST",
                 progress: viewModel.systemMicMuted ? 0.0 : Double(viewModel.systemMicVolume),
                 accentColor: Color(red: 0.15, green: 0.96, blue: 0.62),
-                redlineColor: Color(red: 1.0, green: 0.65, blue: 0.12)
+                redlineColor: Color(red: 1.0, green: 0.65, blue: 0.12),
+                harmonicK: 5.0
             )
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
         .frame(height: 92)
         .background(
             Color(red: 0.07, green: 0.09, blue: 0.14)
@@ -633,6 +605,13 @@ struct CenterStagePerimeterCanvas: View {
                         .animation(.spring(response: 0.32, dampingFraction: 0.80), value: rect)
                     }
                 }
+
+                // Live Poincaré Hyperbolic Geodesic Web, Parallel-Transport Energy Packets & Golden φ-Spiral Overlay
+                HyperbolicGeodesicWebOverlay(
+                    layoutRects: layoutRects,
+                    mode: viewModel.tilingMode,
+                    canvasSize: canvasSize
+                )
             }
             .frame(width: canvasSize.width, height: canvasSize.height)
         }
@@ -672,7 +651,11 @@ struct InteractiveWindowTileCard: View {
         let accent = appThemeColor
         let cut: CGFloat = isCenterStage ? 18 : 11
         let tileShape = CockpitChamferShape(topLeftCut: cut, topRightCut: cut, bottomRightCut: cut, bottomLeftCut: cut)
-        let camLabel = isCenterStage ? "CAM-01 //APEX STAGE" : String(format: "CAM-%02d // PERIM", tileIndex + 1)
+        let phiScale = pow(Double(MathConstants.invPhi), Double(tileIndex))
+        let hypDist = isCenterStage ? 0.0 : 2.0 * atanh(min(0.95, 0.35 + Double(tileIndex) * 0.09))
+        let camLabel = isCenterStage
+            ? "z₀ = 0 // POINCARÉ APEX"
+            : String(format: "∂𝔻-%02d // φ⁻%d=%.2f", tileIndex + 1, tileIndex, phiScale)
 
         Button(action: onTapPromote) {
             ZStack(alignment: .bottomLeading) {
@@ -809,8 +792,8 @@ struct InteractiveWindowTileCard: View {
 
                         Spacer()
 
-                        Text("X:\(Int(window.bounds.origin.x)) Y:\(Int(window.bounds.origin.y)) [\(Int(window.bounds.width))×\(Int(window.bounds.height))]")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        Text(String(format: "dℍ=%.2f · (%d,%d) [%d×%d]", hypDist, Int(window.bounds.origin.x), Int(window.bounds.origin.y), Int(window.bounds.width), Int(window.bounds.height)))
+                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.black.opacity(0.72))

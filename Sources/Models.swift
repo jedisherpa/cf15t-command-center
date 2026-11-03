@@ -230,16 +230,18 @@ struct VoiceAssistantConfig: Identifiable, Codable, Equatable {
 // MARK: - Window Tiling Layout Modes
 
 enum TilingLayoutMode: String, CaseIterable, Identifiable {
-    case centerStageBorder = "Center Stage + Border"
-    case leftStagePerimeter = "Big Left + Right/Bottom Border"
-    case equalSimultaneousGrid = "Equal Multi-Window Grid"
-    case dualVoiceSplit = "50/50 Voice Split (A | B)"
+    case centerStageBorder = "Poincaré Apex + ∂𝔻 Border"
+    case goldenFibonacciSpiral = "Golden φ-Spiral (1.618)"
+    case leftStagePerimeter = "Harmonic Division"
+    case equalSimultaneousGrid = "Isohedral Lattice ℤ²"
+    case dualVoiceSplit = "Symplectic Dual (A ⊕ B)"
 
     var id: String { rawValue }
 
     var iconName: String {
         switch self {
-        case .centerStageBorder: return "rectangle.center.inset.filled"
+        case .centerStageBorder: return "circle.hexagongrid.fill"
+        case .goldenFibonacciSpiral: return "hurricane"
         case .leftStagePerimeter: return "sidebar.right"
         case .equalSimultaneousGrid: return "square.grid.2x2.fill"
         case .dualVoiceSplit: return "rectangle.split.2x1.fill"
@@ -248,10 +250,11 @@ enum TilingLayoutMode: String, CaseIterable, Identifiable {
 
     var shortLabel: String {
         switch self {
-        case .centerStageBorder: return "Center + Border"
-        case .leftStagePerimeter: return "Stage + Perimeter"
-        case .equalSimultaneousGrid: return "Equal Grid"
-        case .dualVoiceSplit: return "50/50 Split"
+        case .centerStageBorder: return "Poincaré ∂𝔻"
+        case .goldenFibonacciSpiral: return "Golden φ-Spiral"
+        case .leftStagePerimeter: return "Harmonic"
+        case .equalSimultaneousGrid: return "ℤ² Lattice"
+        case .dualVoiceSplit: return "Dual A⊕B"
         }
     }
 }
