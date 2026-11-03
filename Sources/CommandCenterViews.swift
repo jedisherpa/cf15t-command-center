@@ -21,27 +21,22 @@ struct CommandCenterMainView: View {
     }
 
     var body: some View {
-        let activeVoiceName = (viewModel.activeVoiceSlotID == "slotA")
-            ? viewModel.slotA.displayName
-            : viewModel.slotB.displayName
-        let isMicLive = (viewModel.slotA.isMicEnabled || viewModel.slotB.isMicEnabled) && !viewModel.systemMicMuted
-
         Group {
             if viewModel.operatingMode == .fullControl && viewModel.isFullControlDocked {
                 FullControlDockedTopBarView(viewModel: viewModel)
             } else {
-                VStack(spacing: 8) {
-                    // 1. Big Nearsighted & Sensory-Friendly Mode + App Switcher Bar
+                VStack(spacing: 6) {
+                    // 1. Compact, High-Contrast Mode + App Switcher + View Mode Bar
                     DualOperatingModeSwitcherBanner(viewModel: viewModel)
 
-                    // 2. Main Interactive Program Canvas (100% Width by Default for Big Nearsighted Cards)
+                    // 2. Full-Height Interactive Program Canvas (Maximizes Screen Area — Zero Wasted Bars)
                     GeometryReader { geo in
                         let totalW = geo.size.width
                         let leftWidth = viewModel.isRightPanelCollapsed
                             ? totalW
                             : max(540, min(totalW - 260, floor(totalW * CGFloat(viewModel.matrixWidthRatio))))
 
-                        HStack(spacing: 8) {
+                        HStack(spacing: 6) {
                             WindowTilingArenaPanel(viewModel: viewModel, currentGear: currentGearNumber)
                                 .frame(width: leftWidth)
 
@@ -51,12 +46,9 @@ struct CommandCenterMainView: View {
                             }
                         }
                     }
-
-                    // 3. Calm, Large-Print Bottom Status & Audio Helper Bar
-                    BottomStatusStrip(viewModel: viewModel)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
                 .background(Color(red: 0.04, green: 0.06, blue: 0.11))
             }
         }
@@ -452,88 +444,18 @@ struct SystemMicAndTouchGuardBox: View {
 
 struct WindowTilingArenaPanel: View {
     @ObservedObject var viewModel: CommandCenterViewModel
-    @ObservedObject var speechEngine = SensoryFriendlySpeechEngine.shared
     let currentGear: Int
 
     var body: some View {
-        VStack(spacing: 8) {
-            // Simple, Large-Print View Style & Audio Helper Bar
-            HStack(spacing: 10) {
-                Text("HOW TO SHOW APPS:")
-                    .font(.system(size: 14, weight: .black, design: .rounded))
-                    .foregroundColor(.white.opacity(0.85))
-
-                ForEach([
-                    (mode: TileContentViewMode.splitVisualAndFeed, icon: "rectangle.split.2x1.fill", title: "PICTURE + WORDS"),
-                    (mode: TileContentViewMode.simplifiedReader, icon: "text.bubble.fill", title: "BIG WORDS ONLY"),
-                    (mode: TileContentViewMode.liveSmartZoom, icon: "photo.fill", title: "PICTURE ONLY")
-                ], id: \.mode.id) { item in
-                    let isSel = (viewModel.tileContentViewMode == item.mode)
-                    Button(action: {
-                        viewModel.tileContentViewMode = item.mode
-                        viewModel.saveDashboardPreferencesAsDefaults()
-                    }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: item.icon)
-                                .font(.system(size: 15, weight: .black))
-                            Text(item.title)
-                                .font(.system(size: 14, weight: .black, design: .rounded))
-                        }
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 8)
-                        .background(isSel ? Color(red: 0.22, green: 0.78, blue: 1.0) : Color.white.opacity(0.12))
-                        .foregroundColor(isSel ? .black : .white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Spacer()
-
-                // Toggle whether tapping AAC picture cards speaks aloud confirmation
-                Button(action: {
-                    speechEngine.speakAACConfirmations.toggle()
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: speechEngine.speakAACConfirmations ? "speaker.wave.3.fill" : "speaker.slash.fill")
-                            .font(.system(size: 16, weight: .black))
-                        Text(speechEngine.speakAACConfirmations ? "VOICE FEEDBACK: ON" : "VOICE FEEDBACK: OFF")
-                            .font(.system(size: 13.5, weight: .black, design: .rounded))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(speechEngine.speakAACConfirmations ? Color(red: 0.14, green: 0.85, blue: 0.52).opacity(0.25) : Color.white.opacity(0.10))
-                    .foregroundColor(speechEngine.speakAACConfirmations ? Color(red: 0.20, green: 0.96, blue: 0.62) : .white.opacity(0.75))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(speechEngine.speakAACConfirmations ? Color(red: 0.14, green: 0.85, blue: 0.52) : Color.clear, lineWidth: 1.5)
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color.white.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-
-            // Interactive Center Stage + Perimeter Border Canvas
-            GeometryReader { arenaGeo in
-                CenterStagePerimeterCanvas(
-                    viewModel: viewModel,
-                    canvasSize: arenaGeo.size
-                )
-            }
+        GeometryReader { arenaGeo in
+            CenterStagePerimeterCanvas(
+                viewModel: viewModel,
+                canvasSize: arenaGeo.size
+            )
         }
-        .padding(10)
-        .background(Color(red: 0.06, green: 0.09, blue: 0.15))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.white.opacity(0.16), lineWidth: 1.5)
-        )
+        .padding(4)
+        .background(Color(red: 0.05, green: 0.08, blue: 0.14))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -836,16 +758,18 @@ struct InteractiveWindowTileCard: View {
                     Color(red: 0.05, green: 0.08, blue: 0.14)
 
                     SimplifiedAppContentView(
+                        viewModel: viewModel,
                         window: window,
+                        cpuPercent: node.cpuPercent,
                         accent: accent,
                         isCenterStage: isCenterStage,
                         viewMode: viewMode,
                         fontScale: fontScale,
                         cardSize: cardGeo.size
                     )
-                    .padding(.top, isCenterStage ? 58 : 48)
-                    .padding(.bottom, isCenterStage ? 62 : 50)
-                    .padding(.horizontal, isCenterStage ? 12 : 8)
+                    .padding(.top, isCenterStage ? 54 : 44)
+                    .padding(.bottom, isCenterStage ? 56 : 46)
+                    .padding(.horizontal, isCenterStage ? 10 : 6)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -986,78 +910,94 @@ struct InteractiveWindowTileCard: View {
     }
 }
 
-// MARK: - 2B. Nearsighted High-Contrast Program Visual + Giant Reader Feed
+// MARK: - 2B. High-Intelligibility Foreground Storyboard + Full Unchopped Live Screen
 
 struct SimplifiedAppContentView: View {
+    @ObservedObject var viewModel: CommandCenterViewModel
     let window: MonitoredWindow
+    let cpuPercent: Double
     let accent: Color
     let isCenterStage: Bool
     let viewMode: TileContentViewMode
     let fontScale: Double
     let cardSize: CGSize
 
+    @State private var zoomLiveScreen: Bool = true
+
     private var digest: WindowLiveDigest {
         window.liveDigest ?? AppContentFeedExtractor.shared.extractLiveDigest(for: window)
     }
 
     private var activeVisualImage: NSImage? {
-        window.focusedContentImage ?? window.previewImage
+        if zoomLiveScreen {
+            return window.focusedContentImage ?? window.previewImage
+        } else {
+            return window.previewImage ?? window.focusedContentImage
+        }
     }
 
-    private var maxVisibleLines: Int {
-        switch viewMode {
-        case .simplifiedReader:
-            return isCenterStage ? 4 : (cardSize.height < 180 ? 1 : 2)
-        case .splitVisualAndFeed:
-            return isCenterStage ? 3 : (cardSize.height < 190 ? 1 : 2)
-        case .liveSmartZoom:
-            return 1
+    private var plainActivityStatusText: String {
+        if cpuPercent >= 6.0 {
+            return "⚡ WORKING RIGHT NOW (\(String(format: "%.0f%%", cpuPercent)) ACTIVE)"
+        }
+        switch digest.style {
+        case .aiAgentThread:
+            return "🟢 READY — WAITING FOR YOUR NEXT INSTRUCTION"
+        case .messagingChat:
+            return "💬 CHAT OPEN — READY TO READ OR REPLY"
+        case .browserDocument:
+            return "🌐 WEB PAGE OPEN — READY TO READ OR SCROLL"
+        case .mediaNowPlaying:
+            return "🎵 AUDIO / MEDIA PLAYER"
+        case .systemInspector:
+            return "🟢 APP OPEN & READY"
         }
     }
 
     var body: some View {
-        let visibleLines = Array(digest.lines.suffix(maxVisibleLines))
+        let allLines = digest.lines
+        let latestLine = allLines.last
+        let historyLines = Array(allLines.dropLast().suffix(isCenterStage ? 5 : 2))
 
         switch viewMode {
         case .liveSmartZoom:
-            ZStack(alignment: .bottomLeading) {
+            // Full-Card Live Window Screen + Big Bottom "What's Happening" Spotlight
+            VStack(spacing: 8) {
                 liveViewportView
-                if let last = visibleLines.last {
-                    SimplifiedDigestLineBubble(
-                        line: last,
-                        style: digest.style,
-                        accent: accent,
-                        isCenterStage: isCenterStage,
-                        fontScale: fontScale
-                    )
-                    .padding(8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if let last = latestLine {
+                    nowHappeningSpotlightCard(line: last)
                 }
             }
 
         case .simplifiedReader:
-            feedColumnView(lines: visibleLines)
+            // 100% Full-Width Big-Words Storyboard (Zero Wasted Space)
+            structuredStoryboardColumn(latestLine: latestLine, historyLines: historyLines)
 
         case .splitVisualAndFeed:
             if activeVisualImage != nil {
                 if isCenterStage || cardSize.width > 500 {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
+                        // Left 46%: Full, Unchopped Live Window View
                         liveViewportView
-                            .frame(width: max(180, cardSize.width * 0.48))
+                            .frame(width: max(200, cardSize.width * 0.46))
 
-                        feedColumnView(lines: visibleLines)
-                            .frame(maxWidth: .infinity)
+                        // Right 54%: Structured "WHAT IS HAPPENING NOW" + Full Message/Step Storyboard
+                        structuredStoryboardColumn(latestLine: latestLine, historyLines: historyLines)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 } else {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 6) {
                         liveViewportView
-                            .frame(height: max(70, (cardSize.height - 95) * 0.48))
+                            .frame(height: max(76, (cardSize.height - 86) * 0.45))
 
-                        feedColumnView(lines: visibleLines)
-                            .frame(maxHeight: .infinity)
+                        structuredStoryboardColumn(latestLine: latestLine, historyLines: historyLines)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
             } else {
-                feedColumnView(lines: visibleLines)
+                structuredStoryboardColumn(latestLine: latestLine, historyLines: historyLines)
             }
         }
     }
@@ -1066,21 +1006,46 @@ struct SimplifiedAppContentView: View {
     private var liveViewportView: some View {
         if let img = activeVisualImage, img.size.width > 4, img.size.height > 4 {
             GeometryReader { geo in
-                Image(nsImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomTrailing)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(accent.opacity(0.65), lineWidth: 2.0)
-                    )
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.black)
+
+                    // Show the entire active window region cleanly without chopping off the left or top!
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    // Top-left badge showing whether we are zoomed into the active chat or viewing full window
+                    Button(action: {
+                        zoomLiveScreen.toggle()
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: zoomLiveScreen ? "minus.magnifyingglass" : "plus.magnifyingglass")
+                                .font(.system(size: 11, weight: .black))
+                            Text(zoomLiveScreen ? "ACTIVE AREA (TAP FOR FULL)" : "FULL WINDOW (TAP TO ZOOM)")
+                                .font(.system(size: 10.5, weight: .black, design: .rounded))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.black.opacity(0.82))
+                        .foregroundColor(Color(red: 0.25, green: 0.88, blue: 1.0))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .padding(6)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(accent.opacity(0.70), lineWidth: 2.0)
+                )
             }
         } else {
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(accent.opacity(0.18))
+                    .fill(accent.opacity(0.16))
                 if let icon = window.appIcon {
                     Image(nsImage: icon)
                         .resizable()
@@ -1090,40 +1055,186 @@ struct SimplifiedAppContentView: View {
         }
     }
 
-    private func feedColumnView(lines: [DigestFeedLine]) -> some View {
-        VStack(alignment: .leading, spacing: isCenterStage ? 8 : 6) {
-            HStack(spacing: 8) {
-                Text(digest.style.badgeLabel)
-                    .font(.system(size: CGFloat((isCenterStage ? 12.0 : 10.5) * fontScale), weight: .black, design: .rounded))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(accent.opacity(0.32))
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+    @ViewBuilder
+    private func structuredStoryboardColumn(latestLine: DigestFeedLine?, historyLines: [DigestFeedLine]) -> some View {
+        if isCenterStage {
+            // FOREGROUNDED (#1 MAIN APP): 3 Clear Visual Sections That Fill 100% of the Card Height!
+            VStack(alignment: .leading, spacing: 8) {
+                // SECTION 1: Plain-English "WHAT THIS APP IS DOING RIGHT NOW" Status & Topic Banner
+                HStack(spacing: 8) {
+                    Text(plainActivityStatusText)
+                        .font(.system(size: 13.5, weight: .black, design: .rounded))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            cpuPercent >= 6.0
+                                ? Color(red: 1.0, green: 0.78, blue: 0.18)
+                                : Color(red: 0.14, green: 0.88, blue: 0.54)
+                        )
+                        .foregroundColor(.black)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
 
+                    Text(digest.contextTitle)
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+                }
+
+                // SECTION 2: GIANT "HAPPENING NOW / LATEST MESSAGE" SPOTLIGHT CARD
+                if let last = latestLine {
+                    nowHappeningSpotlightCard(line: last)
+                }
+
+                // SECTION 3: Earlier Conversation Thread OR Big Interactive "What To Do Next" Action Grid (Never Empty!)
+                if !historyLines.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("EARLIER IN THIS WINDOW:")
+                            .font(.system(size: 12.5, weight: .black, design: .rounded))
+                            .foregroundColor(accent)
+
+                        ScrollView(.vertical, showsIndicators: true) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(historyLines) { line in
+                                    SimplifiedDigestLineBubble(
+                                        line: line,
+                                        style: digest.style,
+                                        accent: accent,
+                                        isCenterStage: true,
+                                        fontScale: fontScale * 0.92
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else {
+                    // When only 1 line was extracted, fill the remaining space with big, clear "WHAT TO DO NEXT" cards!
+                    whatToDoNextHelperGrid
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            // SIDE TILE: Compact, Big-Print Summary + Latest Message
+            VStack(alignment: .leading, spacing: 5) {
                 Text(digest.contextTitle)
-                    .font(.system(size: CGFloat((isCenterStage ? 13.0 : 11.0) * fontScale), weight: .bold, design: .rounded))
+                    .font(.system(size: CGFloat(11.0 * fontScale), weight: .black, design: .rounded))
                     .foregroundColor(accent)
                     .lineLimit(1)
 
-                Spacer(minLength: 0)
-            }
+                if let last = latestLine {
+                    SimplifiedDigestLineBubble(
+                        line: last,
+                        style: digest.style,
+                        accent: accent,
+                        isCenterStage: false,
+                        fontScale: fontScale
+                    )
+                }
 
-            VStack(alignment: .leading, spacing: isCenterStage ? 8 : 6) {
-                ForEach(lines) { line in
+                ForEach(historyLines.suffix(1)) { line in
                     SimplifiedDigestLineBubble(
                         line: line,
                         style: digest.style,
                         accent: accent,
-                        isCenterStage: isCenterStage,
-                        fontScale: fontScale
+                        isCenterStage: false,
+                        fontScale: fontScale * 0.90
                     )
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private func nowHappeningSpotlightCard(line: DigestFeedLine) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles.tv.fill")
+                    .font(.system(size: 15, weight: .black))
+                    .foregroundColor(Color(red: 1.0, green: 0.84, blue: 0.24))
+
+                Text("HAPPENING RIGHT NOW IN \(window.appName.uppercased())")
+                    .font(.system(size: 13.5, weight: .black, design: .rounded))
+                    .foregroundColor(Color(red: 1.0, green: 0.84, blue: 0.24))
+
+                Spacer()
+
+                if let speaker = line.speakerOrTag {
+                    Text(speaker)
+                        .font(.system(size: 12.5, weight: .black, design: .rounded))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.white.opacity(0.16))
+                        .foregroundColor(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
             }
 
-            Spacer(minLength: 0)
+            Text(line.text)
+                .font(.system(
+                    size: CGFloat((isCenterStage ? 16.5 : 13.0) * fontScale),
+                    weight: .black,
+                    design: .rounded
+                ))
+                .foregroundColor(.white)
+                .lineLimit(isCenterStage ? 6 : 3)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(isCenterStage ? 14 : 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(red: 0.08, green: 0.19, blue: 0.22))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(red: 0.16, green: 0.95, blue: 0.58), lineWidth: 2.5)
+        )
+    }
+
+    private var whatToDoNextHelperGrid: some View {
+        let cards = Array(AACVisualSymbolCard.cards(for: window).prefix(4))
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("TAP ANY BIG CARD BELOW TO SEND AN INSTRUCTION TO \(window.appName.uppercased()):")
+                .font(.system(size: 13, weight: .black, design: .rounded))
+                .foregroundColor(Color(red: 1.0, green: 0.82, blue: 0.24))
+
+            HStack(spacing: 8) {
+                ForEach(cards) { card in
+                    Button {
+                        viewModel.executeAACSymbolCard(card, for: window)
+                    } label: {
+                        VStack(spacing: 8) {
+                            Image(systemName: card.iconName)
+                                .font(.system(size: 28, weight: .black))
+                            Text(card.shortTitle)
+                                .font(.system(size: 16, weight: .black, design: .rounded))
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(card.backgroundColor.opacity(0.92))
+                        .foregroundColor(card.foregroundColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.white.opacity(0.5), lineWidth: 2)
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.white.opacity(0.05))
+        )
     }
 }
 
@@ -1135,8 +1246,8 @@ struct SimplifiedDigestLineBubble: View {
     let fontScale: Double
 
     var body: some View {
-        let isUserOrOutgoing = !line.isIncomingOrAgent || (line.speakerOrTag == "YOU")
-        let isToolLine = (line.speakerOrTag == "TOOL")
+        let isUserOrOutgoing = !line.isIncomingOrAgent || (line.speakerOrTag?.contains("YOU") ?? false)
+        let isToolLine = (line.speakerOrTag?.contains("ACTION") ?? false) || (line.speakerOrTag == "TOOL")
 
         let badgeColor: Color = {
             if isUserOrOutgoing {
@@ -1164,12 +1275,12 @@ struct SimplifiedDigestLineBubble: View {
 
                 Text(line.text)
                     .font(.system(
-                        size: CGFloat((isCenterStage ? 15.5 : 12.5) * fontScale),
+                        size: CGFloat((isCenterStage ? 15.0 : 12.5) * fontScale),
                         weight: .bold,
                         design: .rounded
                     ))
                     .foregroundColor(.white)
-                    .lineLimit(isCenterStage ? 4 : 3)
+                    .lineLimit(isCenterStage ? 5 : 3)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, isCenterStage ? 12 : 9)

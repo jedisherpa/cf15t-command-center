@@ -205,26 +205,51 @@ struct DualOperatingModeSwitcherBanner: View {
 
     @ViewBuilder
     private var activeModeQuickDeckRow: some View {
-        HStack(spacing: 10) {
-            Text("TAP ANY APP TO MAKE IT BIG:")
-                .font(.system(size: 14, weight: .black, design: .rounded))
-                .foregroundColor(Color(red: 1.0, green: 0.82, blue: 0.25))
-
+        HStack(spacing: 8) {
             quickProgramTouchStrip
 
             Spacer(minLength: 4)
+
+            // View Mode Selector right in the top bar (No extra wasted bar below!)
+            HStack(spacing: 5) {
+                ForEach([
+                    (mode: TileContentViewMode.splitVisualAndFeed, icon: "rectangle.split.2x1.fill", title: "SCREEN + WORDS"),
+                    (mode: TileContentViewMode.simplifiedReader, icon: "text.bubble.fill", title: "BIG WORDS"),
+                    (mode: TileContentViewMode.liveSmartZoom, icon: "photo.fill", title: "SCREEN ONLY")
+                ], id: \.mode.id) { item in
+                    let isSel = (viewModel.tileContentViewMode == item.mode)
+                    Button(action: {
+                        viewModel.tileContentViewMode = item.mode
+                        viewModel.saveDashboardPreferencesAsDefaults()
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: item.icon)
+                                .font(.system(size: 14, weight: .black))
+                            Text(item.title)
+                                .font(.system(size: 13, weight: .black, design: .rounded))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(isSel ? Color(red: 0.22, green: 0.78, blue: 1.0) : Color.white.opacity(0.12))
+                        .foregroundColor(isSel ? .black : .white)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
 
             if viewModel.operatingMode == .fullControl {
                 Button(action: {
                     viewModel.toggleFullControlTouchKeyboard()
                 }) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         Image(systemName: "keyboard.fill")
-                            .font(.system(size: 16, weight: .black))
+                            .font(.system(size: 15, weight: .black))
                         Text(viewModel.showTouchKeyboardInDock ? "HIDE KEYBOARD" : "KEYBOARD")
-                            .font(.system(size: 14, weight: .black, design: .rounded))
+                            .font(.system(size: 13, weight: .black, design: .rounded))
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                     .background(viewModel.showTouchKeyboardInDock ? Color(red: 1.0, green: 0.78, blue: 0.18) : Color.white.opacity(0.14))
                     .foregroundColor(viewModel.showTouchKeyboardInDock ? .black : .white)
