@@ -109,7 +109,9 @@ final class CommandCenterViewModel: ObservableObject {
         isLaptopLidClosed = KeepAwakeWorker.shared.isLaptopLidClosed()
         isClamshellBatterySleepDisabled = KeepAwakeWorker.shared.isClamshellSleepDisabled()
 
-        applyModeHardwareConfiguration(for: operatingMode, promptClamshellAuth: false)
+        refreshAudioState()
+        refreshAll(captureImages: true)
+        applyModeHardwareConfiguration(for: operatingMode, isUserInitiatedSwitch: false)
         CursorSnapbackEngine.shared.startMonitoring()
         KeepAwakeWorker.shared.setKeepAwake(enabled: keepAwakeEnabled)
 
@@ -123,8 +125,6 @@ final class CommandCenterViewModel: ObservableObject {
         }
         SiSTouchHardwareDriver.shared.start()
 
-        refreshAudioState()
-        refreshAll(captureImages: true)
         startPeriodicRefresh()
     }
 
@@ -326,15 +326,15 @@ final class CommandCenterViewModel: ObservableObject {
         return showTouchKeyboardInDock ? 276 : 112
     }
 
-    func setOperatingMode(_ mode: CommandCenterOperatingMode, promptClamshellAuthIfNeeded: Bool = true) {
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+    func setOperatingMode(_ mode: CommandCenterOperatingMode, promptClamshellAuthIfNeeded: Bool = false) {
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.85)) {
             operatingMode = mode
         }
-        applyModeHardwareConfiguration(for: mode, promptClamshellAuth: promptClamshellAuthIfNeeded)
+        applyModeHardwareConfiguration(for: mode, isUserInitiatedSwitch: true)
         UserDefaults.standard.set(mode.rawValue, forKey: defaultsKeyOperatingMode)
     }
 
-    private func applyModeHardwareConfiguration(for mode: CommandCenterOperatingMode, promptClamshellAuth: Bool) {
+    private func applyModeHardwareConfiguration(for mode: CommandCenterOperatingMode, isUserInitiatedSwitch: Bool) {
         switch mode {
         case .orchestrate:
             isFullControlDocked = false
@@ -343,34 +343,79 @@ final class CommandCenterViewModel: ObservableObject {
             cursorSnapbackEnabled = true
             SiSTouchHardwareDriver.shared.isFullControlSystemTouchMode = false
             _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(dockedTopBar: false)
-            statusBannerMessage = "ORCHESTRATE MODE — Tap any program on CF15T to switch/tile it on your Main MacBook Screen"
+
+            if isUserInitiatedSwitch {
+                // Move open programs back onto the Main MacBook Screen!
+                if orchestrateTapAction == .tileAllOnMain, let stage = currentStageWindow {
+                    let borders = visibleTiledWindows.filter { $0.id != stage.id }
+                    WindowTilingEngine.shared.tileWindowsOnScreen(
+                        stageWindow: stage,
+                        borderWindows: borders,
+                        mode: tilingMode,
+                        targetDisplay: .primaryDisplay,
+                        stageScale: CGFloat(stageScaleFactor),
+                        topDockReserveHeight: 0
+                    )
+                } else {
+                    WindowTilingEngine.shared.gatherAllWindowsOntoDisplay(
+                        windows: visibleTiledWindows,
+                        targetDisplay: .primaryDisplay,
+                        topDockReserveHeight: 0
+                    )
+                    if let stage = currentStageWindow {
+                        WindowTilingEngine.shared.focusAndFillSingleWindow(
+                            stage,
+                            targetDisplay: .primaryDisplay,
+                            topDockReserveHeight: 0,
+                            fillDisplay: autoTileRealWindowsOnTap
+                        )
+                    }
+                }
+            }
+            statusBannerMessage = "ORCHESTRATE MODE — Programs on Main MacBook Screen · Tap CF15T to switch/tile"
 
         case .fullControl:
             keepAwakeEnabled = true
             targetDisplayMode = .externalDisplay
             cursorSnapbackEnabled = false
             SiSTouchHardwareDriver.shared.isFullControlSystemTouchMode = true
-
-            // Gather open windows onto the CF15T screen so nothing is stranded on the laptop display
-            WindowTilingEngine.shared.gatherAllWindowsOntoDisplay(
-                windows: openWindows,
-                targetDisplay: .externalDisplay,
-                topDockReserveHeight: currentDockReserveHeight
-            )
-
-            // Check & optionally arm kernel Clamshell Battery Sleep Lock (pmset disablesleep 1)
             isClamshellBatterySleepDisabled = KeepAwakeWorker.shared.isClamshellSleepDisabled()
-            if !isClamshellBatterySleepDisabled && promptClamshellAuth {
-                KeepAwakeWorker.shared.setClamshellBatterySleepDisabled(true) { [weak self] ok, msg in
-                    guard let self = self else { return }
-                    self.isClamshellBatterySleepDisabled = KeepAwakeWorker.shared.isClamshellSleepDisabled()
-                    self.statusBannerMessage = msg
+
+            if isUserInitiatedSwitch {
+                // Immediately dock the Touch Control Bar at the top of the CF15T and pull live programs onto the CF15T below it!
+                isFullControlDocked = true
+                let dockH = currentDockReserveHeight
+                _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(dockedTopBar: true, dockHeight: dockH)
+
+                WindowTilingEngine.shared.gatherAllWindowsOntoDisplay(
+                    windows: visibleTiledWindows,
+                    targetDisplay: .externalDisplay,
+                    topDockReserveHeight: dockH
+                )
+
+                if let stage = currentStageWindow ?? visibleTiledWindows.first {
+                    let borders = visibleTiledWindows.filter { $0.id != stage.id }
+                    if borders.isEmpty {
+                        WindowTilingEngine.shared.focusAndFillSingleWindow(
+                            stage,
+                            targetDisplay: .externalDisplay,
+                            topDockReserveHeight: dockH,
+                            fillDisplay: true
+                        )
+                    } else {
+                        WindowTilingEngine.shared.tileWindowsOnScreen(
+                            stageWindow: stage,
+                            borderWindows: borders,
+                            mode: tilingMode,
+                            targetDisplay: .externalDisplay,
+                            stageScale: CGFloat(stageScaleFactor),
+                            topDockReserveHeight: dockH
+                        )
+                    }
                 }
-            } else {
-                statusBannerMessage = isClamshellBatterySleepDisabled
-                    ? "FULL CONTROL ARMED — Safe to close laptop lid! Tap any program to use it directly on CF15T"
-                    : "FULL CONTROL ACTIVE — Tap 'ARM LID-CLOSED LOCK' if closing laptop on battery power"
             }
+
+            statusBannerMessage = "FULL CONTROL ACTIVE ON CF15T — All programs moved to CF15T Touchscreen (Works with laptop open or closed)"
         }
     }
 

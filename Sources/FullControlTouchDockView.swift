@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - 1. Prominent Dual-Mode Banner: ORCHESTRATE vs. FULL CONTROL (Travel / Clamshell)
+// MARK: - 1. Prominent Dual-Mode Banner: ORCHESTRATE vs. FULL CONTROL (Works With Laptop Open or Closed)
 
 struct DualOperatingModeSwitcherBanner: View {
     @ObservedObject var viewModel: CommandCenterViewModel
@@ -46,65 +46,65 @@ struct DualOperatingModeSwitcherBanner: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("MODE 1: ORCHESTRATE (MAIN SCREEN)")
                             .font(.system(size: 11.5, weight: .black, design: .monospaced))
-                        Text("Touch here to toggle & tile programs on your MacBook screen")
+                        Text("Programs on MacBook screen · Tap CF15T to switch/tile them")
                             .font(.system(size: 9.5, weight: .medium))
                             .opacity(0.85)
                     }
                     Spacer(minLength: 4)
-                    if isOrchestrate {
-                        Text("ACTIVE")
-                            .font(.system(size: 9, weight: .black, design: .monospaced))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.black.opacity(0.25))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
+                    Text(isOrchestrate ? "ACTIVE" : "TAP TO ACTIVATE")
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(isOrchestrate ? Color.black.opacity(0.25) : Color.white.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 7)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 7)
-                        .fill(isOrchestrate ? Color(red: 0.20, green: 0.86, blue: 1.0) : Color.white.opacity(0.06))
+                        .fill(isOrchestrate ? Color(red: 0.20, green: 0.86, blue: 1.0) : Color.white.opacity(0.08))
                 )
-                .foregroundColor(isOrchestrate ? .black : .white.opacity(0.78))
+                .foregroundColor(isOrchestrate ? .black : .white)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // Mode 2 Button: FULL CONTROL (Laptop Closed / Uber & Train Standalone)
+            // Mode 2 Button: FULL CONTROL (Run Everything on CF15T — Laptop Open or Closed!)
             Button(action: {
-                viewModel.setOperatingMode(.fullControl, promptClamshellAuthIfNeeded: true)
+                viewModel.setOperatingMode(.fullControl)
             }) {
                 HStack(spacing: 8) {
                     Image(systemName: "ipad.landscape.badge.play")
                         .font(.system(size: 15, weight: .black))
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("MODE 2: FULL CONTROL (LAPTOP CLOSED / TRAVEL)")
+                        Text("MODE 2: FULL CONTROL (ON THIS TOUCHSCREEN)")
                             .font(.system(size: 11.5, weight: .black, design: .monospaced))
-                        Text("Close laptop in Ubers/trains · Run & touch everything on CF15T")
+                        Text("Moves apps onto CF15T · Works with laptop open or closed in Ubers/trains")
                             .font(.system(size: 9.5, weight: .medium))
                             .opacity(0.85)
                     }
                     Spacer(minLength: 4)
-                    if isFullControl {
-                        Text("ACTIVE")
-                            .font(.system(size: 9, weight: .black, design: .monospaced))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.black.opacity(0.25))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
+                    Text(isFullControl ? "ACTIVE" : "TAP TO ACTIVATE")
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(isFullControl ? Color.black.opacity(0.25) : Color.white.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 7)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 7)
-                        .fill(isFullControl ? Color(red: 0.15, green: 1.0, blue: 0.62) : Color.white.opacity(0.06))
+                        .fill(isFullControl ? Color(red: 0.15, green: 1.0, blue: 0.62) : Color.white.opacity(0.08))
                 )
-                .foregroundColor(isFullControl ? .black : .white.opacity(0.78))
+                .foregroundColor(isFullControl ? .black : .white)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // Live Clamshell / Lid Sensor & Battery Lock Button
+            // Live Clamshell / Lid Sensor & Optional Battery Lid-Close Lock Button
             clamshellStatusControlButton
         }
     }
@@ -131,7 +131,7 @@ struct DualOperatingModeSwitcherBanner: View {
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 7)
                     .fill(lockArmed ? Color(red: 0.15, green: 1.0, blue: 0.62).opacity(0.16) : Color(red: 1.0, green: 0.78, blue: 0.18).opacity(0.16))
@@ -140,6 +140,7 @@ struct DualOperatingModeSwitcherBanner: View {
                 RoundedRectangle(cornerRadius: 7)
                     .stroke(lockArmed ? Color(red: 0.15, green: 1.0, blue: 0.62) : Color(red: 1.0, green: 0.78, blue: 0.18), lineWidth: 1.2)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -163,6 +164,7 @@ struct DualOperatingModeSwitcherBanner: View {
                                 .background(selected ? Color(red: 0.20, green: 0.86, blue: 1.0) : Color.white.opacity(0.08))
                                 .foregroundColor(selected ? .black : .white.opacity(0.8))
                                 .clipShape(RoundedRectangle(cornerRadius: 5))
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -175,7 +177,7 @@ struct DualOperatingModeSwitcherBanner: View {
                 quickProgramTouchStrip
 
             } else {
-                // FULL CONTROL Mode Quick Controls
+                // FULL CONTROL Mode Quick Controls (when viewing Matrix in Full Control mode)
                 Button(action: {
                     if let stage = viewModel.currentStageWindow {
                         viewModel.openWindowInFullControlCanvas(stage)
@@ -183,7 +185,7 @@ struct DualOperatingModeSwitcherBanner: View {
                 }) {
                     HStack(spacing: 5) {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        Text("USE \(viewModel.currentStageWindow?.appName.uppercased() ?? "ACTIVE APP") FULL-SCREEN ON CF15T")
+                        Text("DOCK BAR & USE \(viewModel.currentStageWindow?.appName.uppercased() ?? "ACTIVE APP") ON CF15T")
                     }
                     .font(.system(size: 10, weight: .black, design: .monospaced))
                     .padding(.horizontal, 10)
@@ -191,6 +193,7 @@ struct DualOperatingModeSwitcherBanner: View {
                     .background(Color(red: 0.15, green: 1.0, blue: 0.62))
                     .foregroundColor(.black)
                     .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
@@ -199,7 +202,7 @@ struct DualOperatingModeSwitcherBanner: View {
                 }) {
                     HStack(spacing: 5) {
                         Image(systemName: "uiwindow.split.2x1")
-                        Text("TILE APPS BELOW TOUCH DOCK")
+                        Text("DOCK BAR & TILE ALL APPS ON CF15T")
                     }
                     .font(.system(size: 10, weight: .black, design: .monospaced))
                     .padding(.horizontal, 10)
@@ -207,6 +210,7 @@ struct DualOperatingModeSwitcherBanner: View {
                     .background(Color(red: 0.20, green: 0.86, blue: 1.0))
                     .foregroundColor(.black)
                     .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
@@ -223,6 +227,7 @@ struct DualOperatingModeSwitcherBanner: View {
                     .background(viewModel.showTouchKeyboardInDock ? Color(red: 1.0, green: 0.78, blue: 0.18) : Color.white.opacity(0.12))
                     .foregroundColor(viewModel.showTouchKeyboardInDock ? .black : .white)
                     .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
@@ -267,6 +272,7 @@ struct DualOperatingModeSwitcherBanner: View {
                                         : Color.white.opacity(0.12)
                                 )
                         )
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -294,55 +300,80 @@ struct FullControlDockedTopBarView: View {
         .overlay(
             Rectangle()
                 .fill(Color(red: 0.15, green: 1.0, blue: 0.62))
-                .frame(height: 2),
+                .frame(height: 2.5),
             alignment: .bottom
         )
     }
 
     private var mainDockToolbarRow: some View {
-        HStack(spacing: 8) {
-            // 1. Expand back to Full Command Center Matrix
+        HStack(spacing: 7) {
+            // 1. Return to ORCHESTRATE Mode (Moves programs back to Main MacBook Screen)
+            Button(action: {
+                viewModel.setOperatingMode(.orchestrate)
+            }) {
+                HStack(spacing: 5) {
+                    Image(systemName: "rectangle.on.rectangle.angled")
+                        .font(.system(size: 13, weight: .black))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("ORCHESTRATE")
+                            .font(.system(size: 10.5, weight: .black, design: .monospaced))
+                        Text("TO MAC SCREEN")
+                            .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color(red: 0.20, green: 0.86, blue: 1.0))
+                .foregroundColor(.black)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // 2. Expand back to Full Command Center Matrix on CF15T
             Button(action: {
                 viewModel.expandFullControlMatrix()
             }) {
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     Image(systemName: "square.grid.3x2.fill")
-                        .font(.system(size: 14, weight: .black))
+                        .font(.system(size: 13, weight: .black))
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("FULL MATRIX")
-                            .font(.system(size: 11, weight: .black, design: .monospaced))
-                        Text("EXPAND DASHBOARD")
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        Text("MATRIX VIEW")
+                            .font(.system(size: 10.5, weight: .black, design: .monospaced))
+                        Text("FULL DASHBOARD")
+                            .font(.system(size: 7.5, weight: .bold, design: .monospaced))
                     }
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .background(Color(red: 0.15, green: 1.0, blue: 0.62))
                 .foregroundColor(.black)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // 2. Switch back to Orchestrate Mode
+            // 3. Tile All Apps on CF15T Below Dock
             Button(action: {
-                viewModel.setOperatingMode(.orchestrate)
+                viewModel.tileAllBelowFullControlDock()
             }) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("⇄ ORCHESTRATE")
+                    Text("⊞ TILE ALL")
                         .font(.system(size: 10, weight: .black, design: .monospaced))
-                        .foregroundColor(Color(red: 0.20, green: 0.86, blue: 1.0))
-                    Text(viewModel.isLaptopLidClosed ? "LID CLOSED" : "MAIN SCREEN")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.75))
+                        .foregroundColor(.white)
+                    Text("ON CF15T")
+                        .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(red: 0.15, green: 1.0, blue: 0.62))
                 }
                 .padding(.horizontal, 9)
                 .padding(.vertical, 8)
-                .background(Color.white.opacity(0.08))
+                .background(Color.white.opacity(0.10))
                 .clipShape(RoundedRectangle(cornerRadius: 7))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // 3. 1-Tap App Switcher on CF15T
+            // 4. 1-Tap App Switcher on CF15T (Tap any app to fill the CF15T screen below the dock)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(viewModel.visibleTiledWindows) { win in
@@ -361,7 +392,7 @@ struct FullControlDockedTopBarView: View {
                                         .font(.system(size: 11, weight: .black, design: .monospaced))
                                         .foregroundColor(isCurrent ? .black : .white)
                                         .lineLimit(1)
-                                    Text(isCurrent ? "ACTIVE BELOW" : "TAP TO OPEN")
+                                    Text(isCurrent ? "ACTIVE BELOW" : "TAP TO FILL")
                                         .font(.system(size: 7.5, weight: .bold, design: .monospaced))
                                         .foregroundColor(isCurrent ? .black.opacity(0.75) : .white.opacity(0.55))
                                 }
@@ -372,6 +403,7 @@ struct FullControlDockedTopBarView: View {
                                 RoundedRectangle(cornerRadius: 7)
                                     .fill(isCurrent ? Color(red: 1.0, green: 0.78, blue: 0.18) : Color.white.opacity(0.10))
                             )
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -380,7 +412,7 @@ struct FullControlDockedTopBarView: View {
 
             Spacer(minLength: 4)
 
-            // 4. Voice Assistant Quick Buttons (Grok Bot / Dot)
+            // 5. Voice Assistant Quick Buttons (Grok Bot / Dot)
             Button(action: {
                 viewModel.toggleSlotMic("slotA")
             }) {
@@ -394,6 +426,7 @@ struct FullControlDockedTopBarView: View {
                 .background(viewModel.slotA.isMicEnabled ? Color(red: 1.0, green: 0.38, blue: 0.18) : Color.white.opacity(0.10))
                 .foregroundColor(viewModel.slotA.isMicEnabled ? .black : .white)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -410,10 +443,11 @@ struct FullControlDockedTopBarView: View {
                 .background(viewModel.slotB.isMicEnabled ? Color(red: 0.15, green: 1.0, blue: 0.62) : Color.white.opacity(0.10))
                 .foregroundColor(viewModel.slotB.isMicEnabled ? .black : .white)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // 5. Touch Scroll & Keyboard Buttons (For Laptop-Closed Use)
+            // 6. Touch Scroll & Keyboard Buttons + Lid-Close Lock
             Button(action: {
                 viewModel.scrollActiveApp(deltaY: 240)
             }) {
@@ -424,6 +458,7 @@ struct FullControlDockedTopBarView: View {
                     .background(Color.white.opacity(0.10))
                     .foregroundColor(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -437,6 +472,7 @@ struct FullControlDockedTopBarView: View {
                     .background(Color.white.opacity(0.10))
                     .foregroundColor(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -453,6 +489,24 @@ struct FullControlDockedTopBarView: View {
                 .background(viewModel.showTouchKeyboardInDock ? Color(red: 1.0, green: 0.78, blue: 0.18) : Color(red: 0.20, green: 0.86, blue: 1.0))
                 .foregroundColor(.black)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button(action: {
+                viewModel.toggleClamshellBatterySleepLock()
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: viewModel.isClamshellBatterySleepDisabled ? "lock.laptopcomputer" : "laptopcomputer")
+                    Text(viewModel.isClamshellBatterySleepDisabled ? "LID LOCK ON" : "LID LOCK")
+                }
+                .font(.system(size: 9.5, weight: .black, design: .monospaced))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+                .background(viewModel.isClamshellBatterySleepDisabled ? Color(red: 0.15, green: 1.0, blue: 0.62) : Color.white.opacity(0.10))
+                .foregroundColor(viewModel.isClamshellBatterySleepDisabled ? .black : .white)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
@@ -494,6 +548,7 @@ struct TouchQuickKeyboardView: View {
                         .background(Color(red: 0.15, green: 1.0, blue: 0.62))
                         .foregroundColor(.black)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
@@ -507,6 +562,7 @@ struct TouchQuickKeyboardView: View {
                         .background(Color.white.opacity(0.14))
                         .foregroundColor(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
@@ -520,6 +576,7 @@ struct TouchQuickKeyboardView: View {
                         .background(Color.white.opacity(0.14))
                         .foregroundColor(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
@@ -533,6 +590,7 @@ struct TouchQuickKeyboardView: View {
                         .background(Color.white.opacity(0.14))
                         .foregroundColor(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
@@ -546,6 +604,7 @@ struct TouchQuickKeyboardView: View {
                         .background(Color.white.opacity(0.14))
                         .foregroundColor(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
@@ -559,6 +618,7 @@ struct TouchQuickKeyboardView: View {
                         .background(Color.white.opacity(0.14))
                         .foregroundColor(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -581,6 +641,7 @@ struct TouchQuickKeyboardView: View {
                         .background(Color.white.opacity(0.16))
                         .foregroundColor(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -609,6 +670,7 @@ struct TouchQuickKeyboardView: View {
                 .background(Color.white.opacity(0.12))
                 .foregroundColor(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

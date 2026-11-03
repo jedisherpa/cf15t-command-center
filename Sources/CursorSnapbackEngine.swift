@@ -88,10 +88,13 @@ final class CursorSnapbackEngine {
 
     func resolveCF15TScreen() -> NSScreen? {
         let screens = NSScreen.screens
-        if screens.count > 1 {
-            return screens.dropFirst().first(where: {
-                Int($0.frame.width) == 1920 && Int($0.frame.height) == 1080
-            }) ?? screens[1]
+        if let external = screens.first(where: { scr in
+            if let id = scr.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID {
+                return CGDisplayIsBuiltin(id) == 0
+            }
+            return false
+        }) {
+            return external
         }
         return screens.first
     }

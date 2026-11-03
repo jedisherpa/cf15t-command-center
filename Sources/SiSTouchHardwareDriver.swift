@@ -37,6 +37,7 @@ final class SiSTouchHardwareDriver {
 
     private var wasPrimaryTouching: Bool = false
     private var lastDispatchedDownPoint: CGPoint = .zero
+    private var isCurrentTouchDragging: Bool = false
     private var lastTwoFingerMidpoint: CGPoint? = nil
 
     private init() {}
@@ -190,18 +191,29 @@ final class SiSTouchHardwareDriver {
 
         if touchingNow && !wasPrimaryTouching {
             wasPrimaryTouching = true
+            isCurrentTouchDragging = false
             lastDispatchedDownPoint = primaryTouchPoint
             if isRemapToCF15TEnabled || isFullControlSystemTouchMode {
                 dispatchTouchToCF15T(phase: .began, normalizedPt: primaryTouchPoint)
             }
         } else if touchingNow && wasPrimaryTouching {
-            if isRemapToCF15TEnabled || isFullControlSystemTouchMode {
-                dispatchTouchToCF15T(phase: .moved, normalizedPt: primaryTouchPoint)
+            let moveDist = hypot(
+                primaryTouchPoint.x - lastDispatchedDownPoint.x,
+                primaryTouchPoint.y - lastDispatchedDownPoint.y
+            )
+            // Ignore micro-jitter (< 1.4% of screen = ~26px) during a tap so SwiftUI Buttons don't cancel the click!
+            if isCurrentTouchDragging || moveDist >= 0.014 {
+                isCurrentTouchDragging = true
+                if isRemapToCF15TEnabled || isFullControlSystemTouchMode {
+                    dispatchTouchToCF15T(phase: .moved, normalizedPt: primaryTouchPoint)
+                }
             }
         } else if !touchingNow && wasPrimaryTouching {
             wasPrimaryTouching = false
+            let releasePoint = isCurrentTouchDragging ? primaryTouchPoint : lastDispatchedDownPoint
+            isCurrentTouchDragging = false
             if isRemapToCF15TEnabled || isFullControlSystemTouchMode {
-                dispatchTouchToCF15T(phase: .ended, normalizedPt: lastDispatchedDownPoint)
+                dispatchTouchToCF15T(phase: .ended, normalizedPt: releasePoint)
             }
             if !isFullControlSystemTouchMode && CursorSnapbackEngine.shared.isSnapbackEnabled {
                 CursorSnapbackEngine.shared.warpBackToSavedMainScreenPositionNow()

@@ -219,17 +219,16 @@ final class WindowTilingEngine {
     ) {
         guard isAccessibilityTrusted(promptIfNeeded: false) else { return }
         for win in windows where win.id != 999_999 {
+            if savedOriginalFrames[win.id] == nil {
+                savedOriginalFrames[win.id] = win.bounds
+            }
             var canvas = resolveTargetCanvas(for: win, displayMode: targetDisplay)
             if topDockReserveHeight > 0 && canvas.height > topDockReserveHeight + 160 {
                 canvas.origin.y += topDockReserveHeight
                 canvas.size.height -= topDockReserveHeight
             }
-            // If window center is not currently inside target canvas, move & clamp it inside
-            let center = CGPoint(x: win.bounds.midX, y: win.bounds.midY)
-            if !canvas.insetBy(dx: -40, dy: -40).contains(center) {
-                let targetFrame = sanitizeRect(canvas.insetBy(dx: 12, dy: 12)).integral
-                applyFrame(targetFrame, to: win, raise: false, activateApp: false)
-            }
+            let targetFrame = sanitizeRect(canvas.insetBy(dx: 10, dy: 10)).integral
+            applyFrame(targetFrame, to: win, raise: true, activateApp: false)
         }
     }
 
@@ -693,13 +692,21 @@ final class WindowTilingEngine {
         let chosenScreen: NSScreen
         switch displayMode {
         case .primaryDisplay:
-            chosenScreen = primaryScreen
+            chosenScreen = screens.first(where: { scr in
+                if let id = scr.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID {
+                    return CGDisplayIsBuiltin(id) != 0
+                }
+                return false
+            }) ?? primaryScreen
+
         case .externalDisplay:
-            if let ext = screens.dropFirst().first {
-                chosenScreen = ext
-            } else {
-                chosenScreen = primaryScreen
-            }
+            chosenScreen = screens.first(where: { scr in
+                if let id = scr.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID {
+                    return CGDisplayIsBuiltin(id) == 0
+                }
+                return false
+            }) ?? screens.dropFirst().first ?? primaryScreen
+
         case .windowCurrentDisplay:
             let center = CGPoint(x: window.bounds.midX, y: window.bounds.midY)
             chosenScreen = screens.first(where: { scr in
