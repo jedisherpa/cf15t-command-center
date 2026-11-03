@@ -37,15 +37,17 @@ final class CommandCenterViewModel: ObservableObject {
     @Published var isClamshellBatterySleepDisabled: Bool = false
 
     var dictationEngine = UniversalVoiceDictationEngine.shared
+    var speechEngine = SensoryFriendlySpeechEngine.shared
     private var dictationCancellable: AnyCancellable?
+    private var speechCancellable: AnyCancellable?
 
     // Window Tiling & CF15T Options
-    @Published var tilingMode: TilingLayoutMode = .centerStageBorder
+    @Published var tilingMode: TilingLayoutMode = .leftStagePerimeter
     @Published var targetDisplayMode: TargetDisplayMode = .primaryDisplay
     @Published var autoTileRealWindowsOnTap: Bool = true
     @Published var captureLivePreviews: Bool = true
 
-    // Adjustable Layout, Visuals & Program Selection Settings
+    // Adjustable Layout, Visuals & Program Selection Settings (Nearsighted & Sensory-Friendly Big Defaults)
     @Published var isShowingSettingsSheet: Bool = false
     @Published var programSelectionMode: ProgramSelectionMode = .automatic
     @Published var customAllowedApps: Set<String> = [
@@ -54,11 +56,11 @@ final class CommandCenterViewModel: ObservableObject {
     @Published var hiddenAppNamesInAutoMode: Set<String> = []
     @Published var defaultStageAppName: String = "" // "" = Automatic (Active Voice / AI Agent)
     @Published var tileContentViewMode: TileContentViewMode = .splitVisualAndFeed
-    @Published var stageScaleFactor: Double = 0.62
-    @Published var matrixWidthRatio: Double = 0.70
-    @Published var isRightPanelCollapsed: Bool = false
-    @Published var feedFontScale: Double = 1.0
-    @Published var maxTiledWindows: Int = 8
+    @Published var stageScaleFactor: Double = 0.65
+    @Published var matrixWidthRatio: Double = 0.74
+    @Published var isRightPanelCollapsed: Bool = true
+    @Published var feedFontScale: Double = 1.48
+    @Published var maxTiledWindows: Int = 4
     @Published var showFloatingFlowLines: Bool = false
 
     @Published var cursorSnapbackEnabled: Bool = true {
@@ -99,10 +101,10 @@ final class CommandCenterViewModel: ObservableObject {
     private let defaultsKeyTileViewMode = "cf15t.ui.tileViewMode"
     private let defaultsKeyStageScale = "cf15t.ui.stageScale"
     private let defaultsKeyMatrixWidth = "cf15t.ui.matrixWidth"
-    private let defaultsKeyFontScale = "cf15t.ui.fontScale"
-    private let defaultsKeyMaxWindows = "cf15t.ui.maxWindows"
+    private let defaultsKeyFontScale = "cf15t.ui.nearsightedFontScale"
+    private let defaultsKeyMaxWindows = "cf15t.ui.nearsightedMaxWindows"
     private let defaultsKeyShowFlowLines = "cf15t.ui.showFlowLines"
-    private let defaultsKeyTilingMode = "cf15t.ui.tilingMode"
+    private let defaultsKeyTilingMode = "cf15t.ui.nearsightedTilingMode"
     private let defaultsKeyOperatingMode = "cf15t.mode.operatingMode"
     private let defaultsKeyOrchestrateAction = "cf15t.mode.orchestrateAction"
 
@@ -114,6 +116,9 @@ final class CommandCenterViewModel: ObservableObject {
         isClamshellBatterySleepDisabled = KeepAwakeWorker.shared.isClamshellSleepDisabled()
 
         dictationCancellable = dictationEngine.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        speechCancellable = speechEngine.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
         dictationEngine.onDictationSent = { [weak self] win, text in
@@ -267,7 +272,7 @@ final class CommandCenterViewModel: ObservableObject {
         let filtered = openWindows.filter { win in
             !excludedWindowIDs.contains(win.id) && isProgramDisplayed(win.appName)
         }
-        return Array(filtered.prefix(max(2, maxTiledWindows)))
+        return Array(filtered.prefix(max(1, maxTiledWindows)))
     }
 
     var currentStageWindow: MonitoredWindow? {
@@ -353,7 +358,7 @@ final class CommandCenterViewModel: ObservableObject {
         case .orchestrate:
             isFullControlDocked = false
             showTouchKeyboardInDock = false
-            isRightPanelCollapsed = false
+            isRightPanelCollapsed = true
             targetDisplayMode = .primaryDisplay
             cursorSnapbackEnabled = true
             SiSTouchHardwareDriver.shared.isFullControlSystemTouchMode = false
@@ -647,6 +652,31 @@ final class CommandCenterViewModel: ObservableObject {
         }
     }
 
+    func executeAACSymbolCard(_ card: AACVisualSymbolCard, for window: MonitoredWindow) {
+        stageWindowID = window.id
+        speechEngine.speakAACConfirmation(card.spokenConfirmation)
+
+        switch card.action {
+        case .sendPrompt(let prompt, let pressReturn):
+            dictationEngine.deliverInstructionToWindow(prompt, window: window, pressReturn: pressReturn)
+            statusBannerMessage = "\(card.emoji) Sent to \(window.appName): \"\(prompt)\""
+
+        case .scrollWindow(let deltaY):
+            scrollWindowInBackground(window, deltaY: deltaY)
+
+        case .sendKeyCombo(let keyCode, let flags, let label):
+            WindowTilingEngine.shared.sendKeystrokeToTargetWindow(
+                keyCode: keyCode,
+                flags: flags,
+                targetWindow: window
+            )
+            statusBannerMessage = "\(card.emoji) \(label) in \(window.appName)"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                self?.refreshAll(captureImages: true)
+            }
+        }
+    }
+
     func applyRealScreenTilingNow(stageWindow: MonitoredWindow? = nil, promptIfUntrusted: Bool = true) {
         guard let stage = stageWindow ?? currentStageWindow else {
             statusBannerMessage = "No open windows available to tile"
@@ -730,15 +760,15 @@ final class CommandCenterViewModel: ObservableObject {
         excludedWindowIDs.removeAll()
         defaultStageAppName = ""
         tileContentViewMode = .splitVisualAndFeed
-        stageScaleFactor = 0.62
-        matrixWidthRatio = 0.70
-        isRightPanelCollapsed = false
-        feedFontScale = 1.0
-        maxTiledWindows = 8
+        stageScaleFactor = 0.65
+        matrixWidthRatio = 0.74
+        isRightPanelCollapsed = true
+        feedFontScale = 1.48
+        maxTiledWindows = 4
         showFloatingFlowLines = false
         orchestrateTapAction = .focusSingleAppOnMain
         saveDashboardPreferencesAsDefaults()
-        statusBannerMessage = "Reset to Automatic Program Selection (showing all open programs)"
+        statusBannerMessage = "Reset to Big Sensory-Friendly Program View"
     }
 
     private func loadDashboardPreferences() {
@@ -767,10 +797,10 @@ final class CommandCenterViewModel: ObservableObject {
             matrixWidthRatio = max(0.48, min(0.95, d.double(forKey: defaultsKeyMatrixWidth)))
         }
         if d.object(forKey: defaultsKeyFontScale) != nil {
-            feedFontScale = max(0.85, min(1.55, d.double(forKey: defaultsKeyFontScale)))
+            feedFontScale = max(1.10, min(2.20, d.double(forKey: defaultsKeyFontScale)))
         }
         if d.object(forKey: defaultsKeyMaxWindows) != nil {
-            maxTiledWindows = max(2, min(12, d.integer(forKey: defaultsKeyMaxWindows)))
+            maxTiledWindows = max(1, min(8, d.integer(forKey: defaultsKeyMaxWindows)))
         }
         if d.object(forKey: defaultsKeyShowFlowLines) != nil {
             showFloatingFlowLines = d.bool(forKey: defaultsKeyShowFlowLines)

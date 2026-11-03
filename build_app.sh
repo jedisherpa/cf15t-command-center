@@ -65,6 +65,7 @@ swiftc \
     "$PROJECT_DIR/Sources/AppContentFeedExtractor.swift" \
     "$PROJECT_DIR/Sources/CoreAudioMicManager.swift" \
     "$PROJECT_DIR/Sources/UniversalVoiceDictationEngine.swift" \
+    "$PROJECT_DIR/Sources/SensoryAndAACSupportEngine.swift" \
     "$PROJECT_DIR/Sources/WindowTilingEngine.swift" \
     "$PROJECT_DIR/Sources/AgentAndTaskMonitor.swift" \
     "$PROJECT_DIR/Sources/CursorSnapbackEngine.swift" \

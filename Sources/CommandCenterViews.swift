@@ -31,79 +31,33 @@ struct CommandCenterMainView: View {
                 FullControlDockedTopBarView(viewModel: viewModel)
             } else {
                 VStack(spacing: 8) {
-                    // 0. Top System Telemetry & Geometric Layout Rule Strip
-                    ShiftLightRevStrip(
-                        totalCPULoad: totalSystemCPULoad,
-                        isAnyMicLive: isMicLive,
-                        activeVoiceName: activeVoiceName,
-                        layoutExplanation: viewModel.tilingMode.geometryExplanation,
-                        isTouchingScreen: viewModel.sisIsTouching
-                    )
-
-                    // 0.5. Dual Operating Mode Switcher: ORCHESTRATE (Main Screen) vs. FULL CONTROL (Laptop Closed / Travel)
+                    // 1. Big Nearsighted & Sensory-Friendly Mode + App Switcher Bar
                     DualOperatingModeSwitcherBanner(viewModel: viewModel)
 
-                    // 1. Voice Switchboard (Grok Bot <-> Dot) + Twin Gauges + 5-Axis Workload Balance Radar
-                    // Shown in ORCHESTRATE mode; collapsed in FULL CONTROL mode so interactive program stations fill 100% of the screen
-                    if viewModel.operatingMode == .orchestrate {
-                        TopVoiceAndSystemBar(
-                            viewModel: viewModel,
-                            totalCPULoad: totalSystemCPULoad,
-                            currentGear: currentGearNumber
-                        )
-                    }
-
-                    // 2. Main Adjustable Split Cockpit: Window Tiling Matrix (Left) | Draggable Handle | AI Engines & Tasks (Right)
+                    // 2. Main Interactive Program Canvas (100% Width by Default for Big Nearsighted Cards)
                     GeometryReader { geo in
                         let totalW = geo.size.width
                         let leftWidth = viewModel.isRightPanelCollapsed
                             ? totalW
                             : max(540, min(totalW - 260, floor(totalW * CGFloat(viewModel.matrixWidthRatio))))
 
-                        HStack(spacing: 6) {
+                        HStack(spacing: 8) {
                             WindowTilingArenaPanel(viewModel: viewModel, currentGear: currentGearNumber)
                                 .frame(width: leftWidth)
 
                             if !viewModel.isRightPanelCollapsed {
-                                // Draggable Split Divider Handle
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 3)
-                                        .fill(Color.white.opacity(0.10))
-                                        .frame(width: 6)
-                                    VStack(spacing: 3) {
-                                        ForEach(0..<4, id: \.self) { _ in
-                                            Circle()
-                                                .fill(Color(red: 0.20, green: 0.88, blue: 1.0))
-                                                .frame(width: 3.5, height: 3.5)
-                                        }
-                                    }
-                                }
-                                .frame(width: 8)
-                                .contentShape(Rectangle())
-                                .gesture(
-                                    DragGesture(minimumDistance: 2)
-                                        .onChanged { value in
-                                            let newX = max(540, min(totalW - 260, value.location.x + leftWidth))
-                                            viewModel.matrixWidthRatio = Double(newX / max(1, totalW))
-                                        }
-                                )
-                                .help("Drag left or right to resize the Window Tiling Matrix vs AI Engines panel")
-
                                 AgentAndTasksSidePanel(viewModel: viewModel)
                                     .frame(maxWidth: .infinity)
                             }
                         }
                     }
 
-                    // 3. Bottom Control & Status Strip
+                    // 3. Calm, Large-Print Bottom Status & Audio Helper Bar
                     BottomStatusStrip(viewModel: viewModel)
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(CockpitCarbonBackground())
-                .overlay(
-                    GeometricTouchSimplexOverlay(contacts: viewModel.sisActiveContacts)
-                )
+                .background(Color(red: 0.04, green: 0.06, blue: 0.11))
             }
         }
         .sheet(isPresented: $viewModel.isShowingVoiceSlotEditor) {
@@ -498,130 +452,72 @@ struct SystemMicAndTouchGuardBox: View {
 
 struct WindowTilingArenaPanel: View {
     @ObservedObject var viewModel: CommandCenterViewModel
+    @ObservedObject var speechEngine = SensoryFriendlySpeechEngine.shared
     let currentGear: Int
 
     var body: some View {
-        let panelShape = CockpitChamferShape(topLeftCut: 18, topRightCut: 18, bottomRightCut: 18, bottomLeftCut: 18)
+        VStack(spacing: 8) {
+            // Simple, Large-Print View Style & Audio Helper Bar
+            HStack(spacing: 10) {
+                Text("HOW TO SHOW APPS:")
+                    .font(.system(size: 14, weight: .black, design: .rounded))
+                    .foregroundColor(.white.opacity(0.85))
 
-        VStack(spacing: 10) {
-            // Sequential Gearbox Bar & Nitro Tile Trigger
-            HStack(spacing: 6) {
-                HStack(spacing: 6) {
-                    Text("G\(currentGear)")
-                        .font(.system(size: 16, weight: .black, design: .monospaced))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color(red: 1.0, green: 0.38, blue: 0.14))
-                        .foregroundColor(.black)
-                        .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("WINDOW TILING MATRIX // \(viewModel.tilingMode.shortLabel.uppercased())")
-                            .font(.system(size: 11, weight: .black, design: .monospaced))
-                            .foregroundColor(.white)
-                        Text(viewModel.tilingMode.geometryExplanation.uppercased())
-                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(red: 0.20, green: 0.86, blue: 1.0))
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer()
-
-                // 5 Geometric Layout Mode Paddles
-                ForEach(Array(TilingLayoutMode.allCases.enumerated()), id: \.element.id) { idx, mode in
-                    let isSelected = (viewModel.tilingMode == mode)
+                ForEach([
+                    (mode: TileContentViewMode.splitVisualAndFeed, icon: "rectangle.split.2x1.fill", title: "PICTURE + WORDS"),
+                    (mode: TileContentViewMode.simplifiedReader, icon: "text.bubble.fill", title: "BIG WORDS ONLY"),
+                    (mode: TileContentViewMode.liveSmartZoom, icon: "photo.fill", title: "PICTURE ONLY")
+                ], id: \.mode.id) { item in
+                    let isSel = (viewModel.tileContentViewMode == item.mode)
                     Button(action: {
-                        viewModel.tilingMode = mode
-                        if viewModel.autoTileRealWindowsOnTap {
-                            viewModel.applyRealScreenTilingNow(promptIfUntrusted: false)
-                        }
+                        viewModel.tileContentViewMode = item.mode
+                        viewModel.saveDashboardPreferencesAsDefaults()
                     }) {
-                        HStack(spacing: 4) {
-                            Text("G\(idx + 1)")
-                                .font(.system(size: 10, weight: .black, design: .monospaced))
-                                .foregroundColor(isSelected ? .black : Color(red: 1.0, green: 0.78, blue: 0.15))
-                            Text(mode.shortLabel.uppercased())
-                                .font(.system(size: 10, weight: .black, design: .monospaced))
-                                .foregroundColor(isSelected ? .black : .white)
+                        HStack(spacing: 6) {
+                            Image(systemName: item.icon)
+                                .font(.system(size: 15, weight: .black))
+                            Text(item.title)
+                                .font(.system(size: 14, weight: .black, design: .rounded))
                         }
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 7)
-                        .background(
-                            isSelected
-                                ? Color(red: 0.20, green: 0.88, blue: 1.0)
-                                : Color.white.opacity(0.08)
-                        )
-                        .clipShape(CockpitChamferShape(topLeftCut: 6, topRightCut: 6, bottomRightCut: 6, bottomLeftCut: 6))
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 8)
+                        .background(isSel ? Color(red: 0.22, green: 0.78, blue: 1.0) : Color.white.opacity(0.12))
+                        .foregroundColor(isSel ? .black : .white)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
 
-                // Physical macOS Screen Tile Trigger
+                Spacer()
+
+                // Toggle whether tapping AAC picture cards speaks aloud confirmation
                 Button(action: {
-                    viewModel.applyRealScreenTilingNow(promptIfUntrusted: true)
+                    speechEngine.speakAACConfirmations.toggle()
                 }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "rectangle.3.group.fill")
-                            .font(.system(size: 11, weight: .black))
-                        Text("TILE MAC")
-                            .font(.system(size: 10, weight: .black, design: .monospaced))
+                    HStack(spacing: 6) {
+                        Image(systemName: speechEngine.speakAACConfirmations ? "speaker.wave.3.fill" : "speaker.slash.fill")
+                            .font(.system(size: 16, weight: .black))
+                        Text(speechEngine.speakAACConfirmations ? "VOICE FEEDBACK: ON" : "VOICE FEEDBACK: OFF")
+                            .font(.system(size: 13.5, weight: .black, design: .rounded))
                     }
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.15, green: 1.0, blue: 0.58),
-                                Color(red: 0.10, green: 0.82, blue: 0.95)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(speechEngine.speakAACConfirmations ? Color(red: 0.14, green: 0.85, blue: 0.52).opacity(0.25) : Color.white.opacity(0.10))
+                    .foregroundColor(speechEngine.speakAACConfirmations ? Color(red: 0.20, green: 0.96, blue: 0.62) : .white.opacity(0.75))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(speechEngine.speakAACConfirmations ? Color(red: 0.14, green: 0.85, blue: 0.52) : Color.clear, lineWidth: 1.5)
                     )
-                    .clipShape(CockpitChamferShape(topLeftCut: 6, topRightCut: 6, bottomRightCut: 6, bottomLeftCut: 6))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-
-                // Prominent SETTINGS & CHOOSE PROGRAMS Button
-                Button(action: {
-                    viewModel.isShowingSettingsSheet = true
-                }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "gearshape.2.fill")
-                            .font(.system(size: 11, weight: .black))
-                        Text("SETTINGS & PROGRAMS")
-                            .font(.system(size: 10, weight: .black, design: .monospaced))
-                    }
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Color(red: 1.0, green: 0.78, blue: 0.15))
-                    .clipShape(CockpitChamferShape(topLeftCut: 6, topRightCut: 6, bottomRightCut: 6, bottomLeftCut: 6))
-                    .shadow(color: Color(red: 1.0, green: 0.78, blue: 0.15).opacity(0.45), radius: 5)
-                }
-                .buttonStyle(.plain)
-
-                // Collapse / Expand Right Panel Button
-                Button(action: {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                        viewModel.isRightPanelCollapsed.toggle()
-                    }
-                }) {
-                    Image(systemName: viewModel.isRightPanelCollapsed ? "sidebar.right" : "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 11, weight: .black))
-                        .foregroundColor(.white)
-                        .padding(7)
-                        .background(Color.white.opacity(0.10))
-                        .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
-                }
-                .buttonStyle(.plain)
-                .help(viewModel.isRightPanelCollapsed ? "Show Right AI Engines Panel" : "Expand Window Matrix to 100% Width")
             }
-
-            // Live Program Roster & Inline Adjustability Strip (Clearly shows what programs are on the matrix + view/size controls)
-            ProgramRosterAndAdjustmentStrip(viewModel: viewModel)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.white.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
 
             // Interactive Center Stage + Perimeter Border Canvas
             GeometryReader { arenaGeo in
@@ -631,11 +527,12 @@ struct WindowTilingArenaPanel: View {
                 )
             }
         }
-        .padding(12)
-        .background(Color(red: 0.06, green: 0.08, blue: 0.13).opacity(0.92))
-        .clipShape(panelShape)
+        .padding(10)
+        .background(Color(red: 0.06, green: 0.09, blue: 0.15))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay(
-            panelShape.stroke(Color(red: 0.20, green: 0.82, blue: 1.0).opacity(0.28), lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1.5)
         )
     }
 }
@@ -894,6 +791,7 @@ struct CenterStagePerimeterCanvas: View {
 struct InteractiveWindowTileCard: View {
     @ObservedObject var viewModel: CommandCenterViewModel
     @ObservedObject var dictationEngine = UniversalVoiceDictationEngine.shared
+    @ObservedObject var speechEngine = SensoryFriendlySpeechEngine.shared
     let node: WindowTelemetryNode
     let isCenterStage: Bool
     let viewMode: TileContentViewMode
@@ -910,36 +808,32 @@ struct InteractiveWindowTileCard: View {
         }
         let lower = window.appName.lowercased()
         if lower.contains("chrome") || lower.contains("safari") {
-            return Color(red: 0.20, green: 0.72, blue: 1.0)
+            return Color(red: 0.24, green: 0.76, blue: 1.0)
         } else if lower.contains("whatsapp") {
-            return Color(red: 0.15, green: 0.95, blue: 0.52)
+            return Color(red: 0.16, green: 0.92, blue: 0.52)
         } else if lower.contains("signal") {
-            return Color(red: 0.38, green: 0.54, blue: 1.0)
+            return Color(red: 0.42, green: 0.62, blue: 1.0)
         } else if lower.contains("music") || lower.contains("spotify") {
-            return Color(red: 1.0, green: 0.28, blue: 0.58)
+            return Color(red: 1.0, green: 0.38, blue: 0.64)
         } else if lower.contains("settings") {
-            return Color(red: 1.0, green: 0.78, blue: 0.18)
+            return Color(red: 1.0, green: 0.80, blue: 0.22)
         } else if lower.contains("finder") {
-            return Color(red: 0.25, green: 0.85, blue: 1.0)
+            return Color(red: 0.28, green: 0.85, blue: 1.0)
         }
-        return Color(red: 0.28, green: 0.82, blue: 1.0)
+        return Color(red: 0.30, green: 0.82, blue: 1.0)
     }
 
     var body: some View {
         let accent = appThemeColor
-        let cut: CGFloat = isCenterStage ? 18 : 11
-        let tileShape = CockpitChamferShape(topLeftCut: cut, topRightCut: cut, bottomRightCut: cut, bottomLeftCut: cut)
+        let tileShape = RoundedRectangle(cornerRadius: 18)
         let isDictatingThisTile = viewModel.isDictating(for: window)
-        let isFullControl = (viewModel.operatingMode == .fullControl)
-        let roleBadge = isCenterStage
-            ? String(format: "★ #1 STAGE · %.0f%%", node.areaPercent)
-            : String(format: "#%d · %.0f%%", node.rankIndex + 1, node.areaPercent)
+        let isReadingThisTile = (speechEngine.isSpeaking && speechEngine.speakingWindowID == window.id)
 
         ZStack(alignment: .bottomLeading) {
-            // High-Clarity Program Visual (Split Live Cropped Screen + Feed, Live Screen Only, or Reader Feed)
+            // 1. High-Clarity Program Visual + Large-Print Message/Response Feed
             GeometryReader { cardGeo in
                 ZStack {
-                    Color(red: 0.04, green: 0.06, blue: 0.10)
+                    Color(red: 0.05, green: 0.08, blue: 0.14)
 
                     SimplifiedAppContentView(
                         window: window,
@@ -949,9 +843,9 @@ struct InteractiveWindowTileCard: View {
                         fontScale: fontScale,
                         cardSize: cardGeo.size
                     )
-                    .padding(.top, isCenterStage ? 34 : 28)
-                    .padding(.bottom, isFullControl ? (isCenterStage ? 38 : 34) : (isCenterStage ? 26 : 22))
-                    .padding(.horizontal, isCenterStage ? 8 : 5)
+                    .padding(.top, isCenterStage ? 58 : 48)
+                    .padding(.bottom, isCenterStage ? 62 : 50)
+                    .padding(.horizontal, isCenterStage ? 12 : 8)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -959,41 +853,30 @@ struct InteractiveWindowTileCard: View {
                 }
             }
 
-            // HUD Corner Brackets inside Center Stage
-            if isCenterStage {
-                HUDCornerBrackets(
-                    color: isDictatingThisTile
-                        ? Color(red: 1.0, green: 0.25, blue: 0.32)
-                        : Color(red: 0.15, green: 1.0, blue: 0.62),
-                    lineWidth: 3.0,
-                    length: 28
-                )
-                .padding(6)
-                .allowsHitTesting(false)
-            }
-
-            // Top & Bottom Telemetry + Universal Voice Dictation Overlay Bars
+            // 2. Giant Nearsighted Top Header + Bottom Non-Verbal AAC Picture-Symbol Bar
             VStack(alignment: .leading, spacing: 0) {
-                // Top Bar: Rank + Program Name + Universal Whisper Mic Button + Voice Status + Boost Button
-                HStack(spacing: 6) {
+                // TOP BAR: Huge App Icon + Bold App Name + READ ALOUD Button + TALK Mic Button + MAKE BIG Button
+                HStack(spacing: isCenterStage ? 10 : 7) {
                     Button(action: onTapPromote) {
-                        HStack(spacing: 5) {
-                            Text(roleBadge)
-                                .font(.system(size: isCenterStage ? 10 : 8, weight: .black, design: .monospaced))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2.5)
-                                .background(isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62) : accent)
-                                .foregroundColor(.black)
-                                .lineLimit(1)
+                        HStack(spacing: 8) {
+                            if isCenterStage {
+                                Text("★ MAIN APP")
+                                    .font(.system(size: 14, weight: .black, design: .rounded))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color(red: 1.0, green: 0.82, blue: 0.20))
+                                    .foregroundColor(.black)
+                                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                            }
 
                             if let icon = window.appIcon {
                                 Image(nsImage: icon)
                                     .resizable()
-                                    .frame(width: isCenterStage ? 16 : 13, height: isCenterStage ? 16 : 13)
+                                    .frame(width: isCenterStage ? 32 : 24, height: isCenterStage ? 32 : 24)
                             }
 
-                            Text(window.appName.uppercased())
-                                .font(.system(size: isCenterStage ? 13 : 10, weight: .black, design: .monospaced))
+                            Text(window.appName)
+                                .font(.system(size: isCenterStage ? 22 : 17, weight: .black, design: .rounded))
                                 .foregroundColor(.white)
                                 .lineLimit(1)
                         }
@@ -1001,178 +884,109 @@ struct InteractiveWindowTileCard: View {
                     }
                     .buttonStyle(.plain)
 
-                    Spacer(minLength: 2)
+                    Spacer(minLength: 4)
 
-                    // UNIVERSAL WHISPER MICROPHONE BUTTON ON EVERY TILE (Works in both ORCHESTRATE & FULL CONTROL)
+                    // 1-TAP READ ALOUD BUTTON (Speaks the app's messages/responses aloud for non-verbal & nearsighted learners)
                     Button {
-                        viewModel.toggleVoiceDictation(for: window)
+                        speechEngine.toggleReadAloud(for: window)
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: isDictatingThisTile ? "stop.circle.fill" : "mic.fill")
-                                .font(.system(size: isCenterStage ? 11 : 9.5, weight: .black))
-                            Text(isDictatingThisTile ? "SEND VOICE ⏎" : (isCenterStage ? "🎙️ WHISPER DICTATE" : "🎙️ DICTATE"))
-                                .font(.system(size: isCenterStage ? 9.5 : 8, weight: .black, design: .monospaced))
+                        HStack(spacing: 6) {
+                            Image(systemName: isReadingThisTile ? "stop.circle.fill" : "speaker.wave.3.fill")
+                                .font(.system(size: isCenterStage ? 18 : 14, weight: .black))
+                            Text(isReadingThisTile ? "STOP READING" : (isCenterStage ? "🔊 READ TO ME" : "🔊 READ"))
+                                .font(.system(size: isCenterStage ? 15.5 : 13, weight: .black, design: .rounded))
                         }
-                        .padding(.horizontal, isCenterStage ? 10 : 7)
-                        .padding(.vertical, isCenterStage ? 4.5 : 3)
+                        .padding(.horizontal, isCenterStage ? 14 : 10)
+                        .padding(.vertical, isCenterStage ? 9 : 7)
                         .background(
-                            isDictatingThisTile
-                                ? Color(red: 1.0, green: 0.22, blue: 0.30)
-                                : Color(red: 0.15, green: 0.96, blue: 0.62)
+                            isReadingThisTile
+                                ? Color(red: 1.0, green: 0.78, blue: 0.18)
+                                : Color(red: 0.24, green: 0.78, blue: 1.0)
                         )
-                        .foregroundColor(isDictatingThisTile ? .white : .black)
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                        .shadow(
-                            color: (isDictatingThisTile ? Color.red : Color(red: 0.15, green: 0.96, blue: 0.62)).opacity(0.45),
-                            radius: 5
-                        )
+                        .foregroundColor(.black)
+                        .clipShape(RoundedRectangle(cornerRadius: 11))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("Dictate next instruction with local Whisper into \(window.appName)'s open prompt")
 
-                    // Voice Channel Badge if this window is Grok Bot (CH-01) or Dot / ChatGPT (CH-02)
-                    if let voiceCode = node.voiceChannelCode {
-                        HStack(spacing: 3) {
-                            Image(systemName: node.isMicLive ? "mic.fill" : "waveform")
-                                .font(.system(size: 8, weight: .black))
-                            Text(
-                                node.isMicLive
-                                    ? "\(voiceCode) MIC LIVE"
-                                    : (node.isActiveVoiceTarget ? "\(voiceCode) VOICE TARGET" : voiceCode)
-                            )
-                            .font(.system(size: 8.5, weight: .black, design: .monospaced))
+                    // 1-TAP WHISPER VOICE DICTATION BUTTON
+                    Button {
+                        viewModel.toggleVoiceDictation(for: window)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: isDictatingThisTile ? "stop.circle.fill" : "mic.fill")
+                                .font(.system(size: isCenterStage ? 18 : 14, weight: .black))
+                            Text(isDictatingThisTile ? "SEND VOICE ⏎" : (isCenterStage ? "🎙️ TALK" : "🎙️ TALK"))
+                                .font(.system(size: isCenterStage ? 15.5 : 13, weight: .black, design: .rounded))
                         }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2.5)
+                        .padding(.horizontal, isCenterStage ? 14 : 10)
+                        .padding(.vertical, isCenterStage ? 9 : 7)
                         .background(
-                            node.isMicLive
-                                ? Color(red: 0.15, green: 1.0, blue: 0.58)
-                                : (node.isActiveVoiceTarget ? Color(red: 1.0, green: 0.78, blue: 0.18) : Color.white.opacity(0.18))
+                            isDictatingThisTile
+                                ? Color(red: 0.98, green: 0.24, blue: 0.30)
+                                : Color(red: 0.14, green: 0.88, blue: 0.54)
                         )
-                        .foregroundColor(node.isMicLive || node.isActiveVoiceTarget ? .black : .white)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .foregroundColor(isDictatingThisTile ? .white : .black)
+                        .clipShape(RoundedRectangle(cornerRadius: 11))
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
 
-                    if isCenterStage && !isFullControl {
-                        Button(action: onFocusOnly) {
+                    // On side tiles: Big "MAKE BIG" button so user knows they can expand it
+                    if !isCenterStage {
+                        Button(action: onTapPromote) {
                             HStack(spacing: 4) {
-                                Image(systemName: "bolt.fill")
-                                Text("BRING TO FRONT")
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.system(size: 13, weight: .black))
+                                Text("MAKE BIG")
+                                    .font(.system(size: 12.5, weight: .black, design: .rounded))
                             }
-                            .font(.system(size: 9.5, weight: .black, design: .monospaced))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color(red: 1.0, green: 0.78, blue: 0.15))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(Color(red: 1.0, green: 0.80, blue: 0.20))
                             .foregroundColor(.black)
-                            .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
-
-                    Button(action: onExclude) {
-                        Image(systemName: "eye.slash.fill")
-                            .font(.system(size: 9, weight: .black))
-                            .foregroundColor(.white.opacity(0.75))
-                            .padding(5)
-                            .background(Color.black.opacity(0.55))
-                            .clipShape(Circle())
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Hide \(window.appName) from Matrix")
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.black.opacity(0.90))
+                .padding(.horizontal, isCenterStage ? 14 : 10)
+                .padding(.vertical, isCenterStage ? 9 : 7)
+                .background(Color(red: 0.04, green: 0.06, blue: 0.11).opacity(0.96))
 
                 Spacer()
 
-                // Bottom Bar:
-                // - In FULL CONTROL mode: Interactive Whisper Voice + Prompt Deck + Scroll Up/Down + Peek App
-                // - In ORCHESTRATE mode: Window Title / AI Platform + Real CPU % + Real Window Dimensions
-                if isFullControl {
-                    FullControlTileBottomDeck(
-                        viewModel: viewModel,
-                        window: window,
-                        isCenterStage: isCenterStage
-                    )
-                } else {
-                    HStack(spacing: 6) {
-                        if let plat = window.platform {
-                            Text("AI // \(plat.rawValue.uppercased())")
-                                .font(.system(size: 8.5, weight: .black, design: .monospaced))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(plat.accentColor)
-                                .foregroundColor(.black)
-                        }
-
-                        Text(window.displayTitle)
-                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.88))
-                            .lineLimit(1)
-
-                        Spacer()
-
-                        if node.cpuPercent >= 0.4 {
-                            Text(String(format: "⚡ %.1f%% CPU", node.cpuPercent))
-                                .font(.system(size: 8.5, weight: .black, design: .monospaced))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(
-                                    node.cpuPercent >= 10.0
-                                        ? Color(red: 1.0, green: 0.45, blue: 0.15)
-                                        : Color.black.opacity(0.78)
-                                )
-                                .foregroundColor(
-                                    node.cpuPercent >= 10.0
-                                        ? .black
-                                        : Color(red: 0.15, green: 1.0, blue: 0.62)
-                                )
-                        }
-
-                        Text("\(Int(window.bounds.width))×\(Int(window.bounds.height))")
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Color.black.opacity(0.72))
-                            .foregroundColor(Color(red: 0.25, green: 0.88, blue: 1.0))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.black.opacity(0.82))
-                }
+                // BOTTOM BAR ON EVERY TILE: Non-Verbal AAC 1-Tap Picture-Symbol Board
+                AACSymbolActionStrip(
+                    viewModel: viewModel,
+                    window: window,
+                    isCenterStage: isCenterStage
+                )
             }
 
-            // Active Per-Tile Whisper Voice Dictation HUD Overlay
+            // 3. Active Per-Tile Whisper Voice Dictation Overlay
             if isDictatingThisTile {
                 PerTileVoiceDictationOverlay(viewModel: viewModel, window: window)
-                    .padding(isCenterStage ? 10 : 4)
+                    .padding(isCenterStage ? 12 : 6)
             }
         }
         .clipShape(tileShape)
         .overlay(
             tileShape.stroke(
                 isDictatingThisTile
-                    ? Color(red: 1.0, green: 0.22, blue: 0.30)
-                    : (node.isMicLive
-                        ? Color(red: 0.15, green: 1.0, blue: 0.58)
-                        : (isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62) : accent.opacity(0.65))),
-                lineWidth: (isDictatingThisTile || isCenterStage || node.isMicLive) ? 3.0 : 1.4
+                    ? Color(red: 1.0, green: 0.28, blue: 0.32)
+                    : (isReadingThisTile
+                        ? Color(red: 1.0, green: 0.82, blue: 0.22)
+                        : (isCenterStage ? Color(red: 1.0, green: 0.82, blue: 0.22) : accent.opacity(0.75))),
+                lineWidth: (isDictatingThisTile || isReadingThisTile || isCenterStage) ? 3.5 : 2.0
             )
         )
-        .shadow(
-            color: isDictatingThisTile
-                ? Color(red: 1.0, green: 0.22, blue: 0.30).opacity(0.55)
-                : (isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62).opacity(0.35) : .black.opacity(0.4)),
-            radius: (isDictatingThisTile || isCenterStage) ? 12 : 4
-        )
+        .shadow(color: .black.opacity(0.45), radius: isCenterStage ? 10 : 5)
     }
 }
 
-// MARK: - 2B. High-Clarity Program Visual (100% Bright Active-Crop Live Screen + Large-Text Feed Drawer)
+// MARK: - 2B. Nearsighted High-Contrast Program Visual + Giant Reader Feed
 
 struct SimplifiedAppContentView: View {
     let window: MonitoredWindow
@@ -1193,9 +1007,9 @@ struct SimplifiedAppContentView: View {
     private var maxVisibleLines: Int {
         switch viewMode {
         case .simplifiedReader:
-            return isCenterStage ? 6 : (cardSize.height < 140 ? 2 : 4)
+            return isCenterStage ? 4 : (cardSize.height < 180 ? 1 : 2)
         case .splitVisualAndFeed:
-            return isCenterStage ? 4 : (cardSize.height < 155 ? 2 : 3)
+            return isCenterStage ? 3 : (cardSize.height < 190 ? 1 : 2)
         case .liveSmartZoom:
             return 1
         }
@@ -1206,7 +1020,6 @@ struct SimplifiedAppContentView: View {
 
         switch viewMode {
         case .liveSmartZoom:
-            // 100% Bright Smart-Cropped Live Window View + Bottom Latest Line Banner
             ZStack(alignment: .bottomLeading) {
                 liveViewportView
                 if let last = visibleLines.last {
@@ -1217,31 +1030,27 @@ struct SimplifiedAppContentView: View {
                         isCenterStage: isCenterStage,
                         fontScale: fontScale
                     )
-                    .padding(6)
+                    .padding(8)
                 }
             }
 
         case .simplifiedReader:
-            // 100% High-Contrast Large-Text Reader Feed
             feedColumnView(lines: visibleLines)
 
         case .splitVisualAndFeed:
-            // Default Hybrid View:
-            // - In Center Stage (or wide cards): Left 56% = 100% Bright Zoomed Live Screen | Right 44% = High-Contrast Live Feed
-            // - In Border Tiles: Top 55% = 100% Bright Zoomed Live Screen | Bottom 45% = High-Contrast Latest Messages/Thread
             if activeVisualImage != nil {
-                if isCenterStage || cardSize.width > 460 {
-                    HStack(spacing: 8) {
+                if isCenterStage || cardSize.width > 500 {
+                    HStack(spacing: 12) {
                         liveViewportView
-                            .frame(width: max(160, cardSize.width * 0.55))
+                            .frame(width: max(180, cardSize.width * 0.48))
 
                         feedColumnView(lines: visibleLines)
                             .frame(maxWidth: .infinity)
                     }
                 } else {
-                    VStack(spacing: 5) {
+                    VStack(spacing: 8) {
                         liveViewportView
-                            .frame(height: max(54, (cardSize.height - 50) * 0.54))
+                            .frame(height: max(70, (cardSize.height - 95) * 0.48))
 
                         feedColumnView(lines: visibleLines)
                             .frame(maxHeight: .infinity)
@@ -1262,55 +1071,45 @@ struct SimplifiedAppContentView: View {
                     .aspectRatio(contentMode: .fill)
                     .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomTrailing)
                     .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(accent.opacity(0.55), lineWidth: 1.2)
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(accent.opacity(0.65), lineWidth: 2.0)
                     )
-                    .overlay(alignment: .topLeading) {
-                        Text("LIVE VIEW")
-                            .font(.system(size: 7.5, weight: .black, design: .monospaced))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Color.black.opacity(0.78))
-                            .foregroundColor(Color(red: 0.15, green: 1.0, blue: 0.62))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                            .padding(4)
-                    }
             }
         } else {
             ZStack {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(accent.opacity(0.15))
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(accent.opacity(0.18))
                 if let icon = window.appIcon {
                     Image(nsImage: icon)
                         .resizable()
-                        .frame(width: 44, height: 44)
+                        .frame(width: 64, height: 64)
                 }
             }
         }
     }
 
     private func feedColumnView(lines: [DigestFeedLine]) -> some View {
-        VStack(alignment: .leading, spacing: isCenterStage ? 5 : 3) {
-            HStack(spacing: 5) {
-                Text(digest.statusBadge)
-                    .font(.system(size: CGFloat((isCenterStage ? 9.0 : 7.5) * fontScale), weight: .black, design: .monospaced))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1.5)
-                    .background(accent.opacity(0.28))
+        VStack(alignment: .leading, spacing: isCenterStage ? 8 : 6) {
+            HStack(spacing: 8) {
+                Text(digest.style.badgeLabel)
+                    .font(.system(size: CGFloat((isCenterStage ? 12.0 : 10.5) * fontScale), weight: .black, design: .rounded))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(accent.opacity(0.32))
                     .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 Text(digest.contextTitle)
-                    .font(.system(size: CGFloat((isCenterStage ? 10.0 : 8.5) * fontScale), weight: .bold, design: .monospaced))
+                    .font(.system(size: CGFloat((isCenterStage ? 13.0 : 11.0) * fontScale), weight: .bold, design: .rounded))
                     .foregroundColor(accent)
                     .lineLimit(1)
 
                 Spacer(minLength: 0)
             }
 
-            VStack(alignment: .leading, spacing: isCenterStage ? 4.5 : 3) {
+            VStack(alignment: .leading, spacing: isCenterStage ? 8 : 6) {
                 ForEach(lines) { line in
                     SimplifiedDigestLineBubble(
                         line: line,
@@ -1341,64 +1140,56 @@ struct SimplifiedDigestLineBubble: View {
 
         let badgeColor: Color = {
             if isUserOrOutgoing {
-                return Color(red: 1.0, green: 0.78, blue: 0.18)
+                return Color(red: 1.0, green: 0.82, blue: 0.22)
             } else if isToolLine {
-                return Color(red: 0.20, green: 0.88, blue: 1.0)
+                return Color(red: 0.25, green: 0.85, blue: 1.0)
             } else if line.isHighlighted {
-                return Color(red: 0.15, green: 1.0, blue: 0.62)
+                return Color(red: 0.16, green: 0.95, blue: 0.58)
             } else {
                 return accent
             }
         }()
 
-        HStack(alignment: .top, spacing: 5) {
-            RoundedRectangle(cornerRadius: 1.5)
+        HStack(alignment: .top, spacing: 8) {
+            RoundedRectangle(cornerRadius: 3)
                 .fill(badgeColor)
-                .frame(width: 3)
+                .frame(width: 6)
 
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    if let speaker = line.speakerOrTag {
-                        Text(speaker)
-                            .font(.system(size: CGFloat((isCenterStage ? 8.5 : 7.5) * fontScale), weight: .black, design: .monospaced))
-                            .foregroundColor(badgeColor)
-                    }
-
-                    if line.isHighlighted {
-                        Circle()
-                            .fill(Color(red: 0.15, green: 1.0, blue: 0.62))
-                            .frame(width: 5, height: 5)
-                    }
+            VStack(alignment: .leading, spacing: 3) {
+                if let speaker = line.speakerOrTag {
+                    Text(speaker)
+                        .font(.system(size: CGFloat((isCenterStage ? 11.5 : 10.0) * fontScale), weight: .black, design: .rounded))
+                        .foregroundColor(badgeColor)
                 }
 
                 Text(line.text)
                     .font(.system(
-                        size: CGFloat((isCenterStage ? 11.5 : 9.5) * fontScale),
-                        weight: line.isHighlighted ? .bold : .medium,
-                        design: style == .aiAgentThread ? .monospaced : .default
+                        size: CGFloat((isCenterStage ? 15.5 : 12.5) * fontScale),
+                        weight: .bold,
+                        design: .rounded
                     ))
-                    .foregroundColor(line.isHighlighted ? .white : .white.opacity(0.92))
-                    .lineLimit(isCenterStage ? 3 : 2)
+                    .foregroundColor(.white)
+                    .lineLimit(isCenterStage ? 4 : 3)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, isCenterStage ? 7 : 5)
-            .padding(.vertical, isCenterStage ? 4.5 : 3)
+            .padding(.horizontal, isCenterStage ? 12 : 9)
+            .padding(.vertical, isCenterStage ? 9 : 7)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: 11)
                     .fill(
                         isUserOrOutgoing
-                            ? Color(red: 0.18, green: 0.15, blue: 0.08).opacity(0.94)
+                            ? Color(red: 0.20, green: 0.17, blue: 0.08).opacity(0.96)
                             : (line.isHighlighted
-                                ? Color(red: 0.07, green: 0.17, blue: 0.19).opacity(0.95)
-                                : Color.black.opacity(0.84))
+                                ? Color(red: 0.08, green: 0.20, blue: 0.22).opacity(0.97)
+                                : Color(red: 0.08, green: 0.11, blue: 0.18).opacity(0.95))
                     )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: 11)
                     .stroke(
-                        line.isHighlighted ? badgeColor.opacity(0.85) : Color.white.opacity(0.12),
-                        lineWidth: line.isHighlighted ? 1.2 : 0.7
+                        line.isHighlighted ? badgeColor : Color.white.opacity(0.18),
+                        lineWidth: line.isHighlighted ? 2.0 : 1.0
                     )
             )
         }
@@ -1674,135 +1465,60 @@ struct BottomStatusStrip: View {
     @ObservedObject var viewModel: CommandCenterViewModel
 
     var body: some View {
-        let stripShape = CockpitChamferShape(topLeftCut: 8, topRightCut: 8, bottomRightCut: 8, bottomLeftCut: 8)
-
-        HStack(spacing: 10) {
-            // Live SiS HID Steering / Touch Telemetry Pill
-            Button(action: {
-                viewModel.sisRemapToCF15TEnabled.toggle()
-            }) {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(
-                            viewModel.sisIsTouching
-                                ? Color(red: 1.0, green: 0.38, blue: 0.14)
-                                : (viewModel.sisHardwareConnected
-                                    ? Color(red: 0.15, green: 1.0, blue: 0.60)
-                                    : Color.white.opacity(0.35))
-                        )
-                        .frame(width: 8, height: 8)
-                    Text(
-                        viewModel.sisIsTouching
-                            ? String(format: "TOUCH LOCK [X:%02.0f Y:%02.0f]", viewModel.sisNormalizedPoint.x * 100, viewModel.sisNormalizedPoint.y * 100)
-                            : (viewModel.sisHardwareConnected ? "SiS-0x0457 // \(viewModel.sisRemapToCF15TEnabled ? "LOCKED TO CF15T" : "RAW")" : "SiS OFFLINE")
-                    )
-                    .font(.system(size: 10, weight: .black, design: .monospaced))
+        HStack(spacing: 12) {
+            // Large, clear status readout
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(Color(red: 0.15, green: 0.92, blue: 0.56))
+                    .frame(width: 12, height: 12)
+                Text(viewModel.statusBannerMessage)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Color.white.opacity(0.08))
-                .clipShape(stripShape)
-            }
-            .buttonStyle(.plain)
-
-            // Live Telemetry Status Readout
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right.2")
-                    .font(.system(size: 10, weight: .black))
-                    .foregroundColor(Color(red: 1.0, green: 0.78, blue: 0.15))
-                Text(viewModel.statusBannerMessage.uppercased())
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.9))
                     .lineLimit(1)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(Color.white.opacity(0.05))
-            .clipShape(stripShape)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 11))
 
             Spacer()
-
-            Toggle("AUTO-SHIFT WINDOWS", isOn: $viewModel.autoTileRealWindowsOnTap)
-                .toggleStyle(.switch)
-                .font(.system(size: 10, weight: .black, design: .monospaced))
-                .foregroundColor(.white)
-
-            Picker("", selection: $viewModel.targetDisplayMode) {
-                ForEach(TargetDisplayMode.allCases) { mode in
-                    Text(mode.rawValue.uppercased()).tag(mode)
-                }
-            }
-            .labelsHidden()
-            .frame(width: 175)
-            .font(.system(size: 10, weight: .bold, design: .monospaced))
-
-            if !viewModel.isAccessibilityGranted {
-                Button(action: {
-                    viewModel.requestAccessibilityPermission()
-                }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "key.fill")
-                        Text("UNLOCK AX TILING")
-                    }
-                    .font(.system(size: 10, weight: .black, design: .monospaced))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Color(red: 1.0, green: 0.75, blue: 0.15))
-                    .foregroundColor(.black)
-                    .clipShape(stripShape)
-                }
-                .buttonStyle(.plain)
-            }
 
             Button(action: {
                 viewModel.isShowingSettingsSheet = true
             }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "gearshape.2.fill")
-                    Text("SETTINGS")
+                HStack(spacing: 6) {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 15, weight: .black))
+                    Text("CHOOSE APPS & SETTINGS")
+                        .font(.system(size: 14, weight: .black, design: .rounded))
                 }
-                .font(.system(size: 10, weight: .black, design: .monospaced))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Color(red: 1.0, green: 0.78, blue: 0.15))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color(red: 1.0, green: 0.80, blue: 0.20))
                 .foregroundColor(.black)
-                .clipShape(stripShape)
-            }
-            .buttonStyle(.plain)
-
-            Button(action: {
-                viewModel.snapPanelToCF15T()
-            }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "display")
-                    Text("LOCK TO CF15T")
-                }
-                .font(.system(size: 10, weight: .black, design: .monospaced))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Color.white.opacity(0.10))
-                .foregroundColor(.white)
-                .clipShape(stripShape)
+                .clipShape(RoundedRectangle(cornerRadius: 11))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             Button(action: {
                 viewModel.refreshAll(captureImages: true)
             }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "bolt.horizontal.fill")
-                    Text("SCAN")
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 15, weight: .black))
+                    Text("REFRESH")
+                        .font(.system(size: 14, weight: .black, design: .rounded))
                 }
-                .font(.system(size: 10, weight: .black, design: .monospaced))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Color(red: 0.20, green: 0.86, blue: 1.0).opacity(0.25))
-                .foregroundColor(Color(red: 0.20, green: 0.86, blue: 1.0))
-                .clipShape(stripShape)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color(red: 0.22, green: 0.78, blue: 1.0))
+                .foregroundColor(.black)
+                .clipShape(RoundedRectangle(cornerRadius: 11))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
-        .frame(height: 34)
+        .frame(height: 40)
     }
 }
