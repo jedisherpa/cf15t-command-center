@@ -21,22 +21,29 @@ struct CommandCenterMainView: View {
     }
 
     var body: some View {
+        let activeVoiceName = (viewModel.activeVoiceSlotID == "slotA")
+            ? viewModel.slotA.displayName
+            : viewModel.slotB.displayName
+        let isMicLive = (viewModel.slotA.isMicEnabled || viewModel.slotB.isMicEnabled) && !viewModel.systemMicMuted
+
         VStack(spacing: 10) {
-            // 0. Top F1 / GT3 Shift-Light & Differential Geometry Invariant Strip
+            // 0. Top System Telemetry & Geometric Layout Rule Strip
             ShiftLightRevStrip(
                 totalCPULoad: totalSystemCPULoad,
-                isAnyMicLive: viewModel.slotA.isMicEnabled || viewModel.slotB.isMicEnabled,
+                isAnyMicLive: isMicLive,
+                activeVoiceName: activeVoiceName,
+                layoutExplanation: viewModel.tilingMode.geometryExplanation,
                 isTouchingScreen: viewModel.sisIsTouching
             )
 
-            // 1. Supercar Instrument Cluster & Pit-Radio Switchboard (Grok Bot <-> Dot + Twin Gauges + Hopf Orb)
+            // 1. Voice Switchboard (Grok Bot <-> Dot) + Twin Gauges + 5-Axis Workload Balance Radar
             TopVoiceAndSystemBar(
                 viewModel: viewModel,
                 totalCPULoad: totalSystemCPULoad,
                 currentGear: currentGearNumber
             )
 
-            // 2. Main Split Cockpit: Multi-Cam Viewport Matrix (Left 67%) | ECU Telemetry Tower (Right 33%)
+            // 2. Main Split Cockpit: Window Tiling Matrix (Left 67%) | AI Engines & Tasks (Right 33%)
             GeometryReader { geo in
                 let leftWidth = max(620, floor((geo.size.width - 12) * 0.67))
                 HStack(spacing: 12) {
@@ -48,7 +55,7 @@ struct CommandCenterMainView: View {
                 }
             }
 
-            // 3. Bottom Diffuser & Pit-Lane Control Strip
+            // 3. Bottom Control & Status Strip
             BottomStatusStrip(viewModel: viewModel)
         }
         .padding(.horizontal, 14)
@@ -74,7 +81,7 @@ struct TopVoiceAndSystemBar: View {
         HStack(spacing: 10) {
             // Left Wing: Channel 01 (Grok Bot)
             VoiceAssistantDeckCard(
-                channelTag: "CH-01 // PRIMARY",
+                channelTag: "CH-01 // PRIMARY VOICE",
                 slot: viewModel.slotA,
                 isActiveSlot: viewModel.activeVoiceSlotID == "slotA",
                 accentColor: Color(red: 1.0, green: 0.36, blue: 0.14),
@@ -86,7 +93,7 @@ struct TopVoiceAndSystemBar: View {
                 }
             )
 
-            // Center Instrument Cluster: Twin Arc Gauges + Gear Readout + OVERTAKE A/B Paddle
+            // Center Instrument Cluster: Twin Arc Gauges + 5-Axis Workload Radar + Voice Swap Paddle
             CenterTelemetryCluster(
                 viewModel: viewModel,
                 totalCPULoad: totalCPULoad,
@@ -95,7 +102,7 @@ struct TopVoiceAndSystemBar: View {
 
             // Right Wing: Channel 02 (Dot)
             VoiceAssistantDeckCard(
-                channelTag: "CH-02 // CO-PILOT",
+                channelTag: "CH-02 // CO-PILOT VOICE",
                 slot: viewModel.slotB,
                 isActiveSlot: viewModel.activeVoiceSlotID == "slotB",
                 accentColor: Color(red: 0.12, green: 0.96, blue: 0.68),
@@ -107,7 +114,7 @@ struct TopVoiceAndSystemBar: View {
                 }
             )
 
-            // Far-Right ECU Switch Box (Hardware Mic Kill + Ignition Awake + Traction Snap)
+            // Far-Right ECU Switch Box (Hardware Mic Kill + Keep-Awake + Cursor Snap)
             SystemMicAndTouchGuardBox(viewModel: viewModel)
                 .frame(width: 335)
         }
@@ -120,32 +127,60 @@ struct CenterTelemetryCluster: View {
     let totalCPULoad: Double
     let currentGear: Int
 
+    private var grokActivityWeight: Double {
+        let isTarget = viewModel.activeVoiceSlotID == "slotA"
+        let cpu = viewModel.agentSnapshots.first(where: { $0.platform == .grokBot })?.cpuPercent ?? 0
+        return min(1.0, (isTarget ? 0.65 : 0.25) + cpu / 25.0 + (viewModel.slotA.isMicEnabled ? 0.35 : 0))
+    }
+
+    private var dotActivityWeight: Double {
+        let isTarget = viewModel.activeVoiceSlotID == "slotB"
+        let cpu = viewModel.agentSnapshots.first(where: { $0.platform == .dot || $0.platform == .chatGPT })?.cpuPercent ?? 0
+        return min(1.0, (isTarget ? 0.65 : 0.25) + cpu / 25.0 + (viewModel.slotB.isMicEnabled ? 0.35 : 0))
+    }
+
+    private var otherAIWeight: Double {
+        let cpu = viewModel.agentSnapshots
+            .filter { $0.platform != .grokBot && $0.platform != .dot }
+            .reduce(0.0) { $0 + $1.cpuPercent }
+        return min(1.0, 0.22 + cpu / 35.0)
+    }
+
+    private var micWeight: Double {
+        guard !viewModel.systemMicMuted && (viewModel.slotA.isMicEnabled || viewModel.slotB.isMicEnabled) else {
+            return 0.18
+        }
+        return min(1.0, max(0.35, Double(viewModel.systemMicVolume)))
+    }
+
     var body: some View {
         HStack(spacing: 8) {
-            // Left Tachometer: AI Engine RPM + Rhodonea Rose Curve
+            // Left Gauge: Total AI & System CPU %
             CockpitArcGaugeView(
-                title: "ECU LOAD",
-                valueText: String(format: "%.0f", min(99, totalCPULoad)),
-                unitText: "% RPM",
-                progress: min(1.0, max(0.08, totalCPULoad / 80.0)),
+                title: "AI CPU",
+                valueText: String(format: "%.0f%%", min(99, totalCPULoad)),
+                unitText: "LOAD",
+                progress: min(1.0, max(0.05, totalCPULoad / 80.0)),
                 accentColor: Color(red: 0.18, green: 0.85, blue: 1.0),
-                redlineColor: Color(red: 1.0, green: 0.25, blue: 0.20),
-                harmonicK: 3.0
+                redlineColor: Color(red: 1.0, green: 0.25, blue: 0.20)
             )
 
-            // Live 4D Stereographic Clifford Torus / Hopf Fibration Phase-Space Orb
-            CliffordHopfAttractorOrb(
-                cpuLoad: totalCPULoad,
-                isMicLive: viewModel.slotA.isMicEnabled || viewModel.slotB.isMicEnabled
+            // Live 5-Axis Barycentric Workload Balance Radar (GROK / DOT / AI / MIC / APPS)
+            WorkloadBalanceRadarView(
+                grokWeight: grokActivityWeight,
+                dotWeight: dotActivityWeight,
+                claudeCodexWeight: otherAIWeight,
+                voiceMicWeight: micWeight,
+                appsWeight: min(1.0, Double(viewModel.openWindows.count) / 10.0)
             )
 
-            // Center Overtake / Comms Swap Button + Digital Gear Indicator
+            // Center Voice Swap Button + Active Layout Mode Indicator
             Button(action: {
                 viewModel.pingPongSwitchVoiceAssistants()
             }) {
                 VStack(spacing: 3) {
                     HStack(spacing: 5) {
-                        Text("MANIFOLD")
+                        Text("LAYOUT")
                             .font(.system(size: 8.5, weight: .black, design: .monospaced))
                             .foregroundColor(.white.opacity(0.6))
                         Text("G\(currentGear)")
@@ -154,10 +189,10 @@ struct CenterTelemetryCluster: View {
                     }
 
                     HStack(spacing: 4) {
-                        Image(systemName: "bolt.horizontal.circle.fill")
-                            .font(.system(size: 15, weight: .black))
-                        Text("OVERTAKE")
-                            .font(.system(size: 12, weight: .black, design: .monospaced))
+                        Image(systemName: "arrow.left.arrow.right.circle.fill")
+                            .font(.system(size: 14, weight: .black))
+                        Text("SWAP VOICE")
+                            .font(.system(size: 11, weight: .black, design: .monospaced))
                     }
                     .foregroundColor(.black)
                     .padding(.horizontal, 10)
@@ -183,15 +218,14 @@ struct CenterTelemetryCluster: View {
             }
             .buttonStyle(.plain)
 
-            // Right Boost Gauge: Mic Gain PSI + Rhodonea Harmonics
+            // Right Gauge: Hardware Microphone Gain %
             CockpitArcGaugeView(
                 title: "MIC GAIN",
-                valueText: viewModel.systemMicMuted ? "MUTE" : "\(Int(viewModel.systemMicVolume * 100))",
-                unitText: viewModel.systemMicMuted ? "0 PSI" : "% BOOST",
+                valueText: viewModel.systemMicMuted ? "MUTE" : "\(Int(viewModel.systemMicVolume * 100))%",
+                unitText: viewModel.systemMicMuted ? "OFF" : "LIVE",
                 progress: viewModel.systemMicMuted ? 0.0 : Double(viewModel.systemMicVolume),
                 accentColor: Color(red: 0.15, green: 0.96, blue: 0.62),
-                redlineColor: Color(red: 1.0, green: 0.65, blue: 0.12),
-                harmonicK: 5.0
+                redlineColor: Color(red: 1.0, green: 0.65, blue: 0.12)
             )
         }
         .padding(.horizontal, 10)
@@ -437,18 +471,19 @@ struct WindowTilingArenaPanel: View {
                         .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
 
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("VIEWPORT TELEMETRY MATRIX // CENTER STAGE + PERIMETER")
+                        Text("WINDOW TILING MATRIX // \(viewModel.tilingMode.shortLabel.uppercased())")
                             .font(.system(size: 11, weight: .black, design: .monospaced))
                             .foregroundColor(.white)
-                        Text("TOUCH ANY PERIMETER CAMERA FEED TO LOCK IT INTO MAIN STAGE")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        Text(viewModel.tilingMode.geometryExplanation.uppercased())
+                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                             .foregroundColor(Color(red: 0.20, green: 0.86, blue: 1.0))
+                            .lineLimit(1)
                     }
                 }
 
                 Spacer()
 
-                // 4 Gear Layout Paddles
+                // 5 Geometric Layout Mode Paddles
                 ForEach(Array(TilingLayoutMode.allCases.enumerated()), id: \.element.id) { idx, mode in
                     let isSelected = (viewModel.tilingMode == mode)
                     Button(action: {
@@ -477,14 +512,14 @@ struct WindowTilingArenaPanel: View {
                     .buttonStyle(.plain)
                 }
 
-                // NITRO: Physical macOS Screen Tile Trigger
+                // Physical macOS Screen Tile Trigger
                 Button(action: {
                     viewModel.applyRealScreenTilingNow(promptIfUntrusted: true)
                 }) {
                     HStack(spacing: 4) {
-                        Image(systemName: "flame.fill")
+                        Image(systemName: "rectangle.3.group.fill")
                             .font(.system(size: 11, weight: .black))
-                        Text("ENGAGE TILE")
+                        Text("TILE MAC SCREEN")
                             .font(.system(size: 10, weight: .black, design: .monospaced))
                     }
                     .foregroundColor(.black)
@@ -544,10 +579,10 @@ struct CenterStagePerimeterCanvas: View {
         let windows = viewModel.visibleTiledWindows
         if windows.isEmpty {
             VStack(spacing: 12) {
-                Image(systemName: "car.top.radiowaves.rear.right.and.rear.left.fill")
+                Image(systemName: "macwindow.on.rectangle")
                     .font(.system(size: 42))
                     .foregroundColor(Color(red: 0.20, green: 0.86, blue: 1.0))
-                Text("NO TELEMETRY VIEWPORTS DETECTED")
+                Text("NO OPEN WINDOWS DETECTED")
                     .font(.system(size: 16, weight: .black, design: .monospaced))
                     .foregroundColor(.white)
                 Button(action: {
@@ -581,36 +616,53 @@ struct CenterStagePerimeterCanvas: View {
                 gap: 10
             )
 
+            let totalArea = max(1.0, Double(layoutRects.reduce(0.0) { $0 + ($1.width * $1.height) }))
+            let telemetryNodes: [WindowTelemetryNode] = orderedWindows.enumerated().compactMap { index, win in
+                guard index < layoutRects.count else { return nil }
+                let r = layoutRects[index]
+                let areaPct = Double(r.width * r.height) / totalArea * 100.0
+                let cpuPct = viewModel.cpuPercent(for: win)
+                let voiceInfo = viewModel.voiceSlotMatch(for: win)
+                return WindowTelemetryNode(
+                    window: win,
+                    rect: r,
+                    rankIndex: index,
+                    areaPercent: areaPct,
+                    cpuPercent: cpuPct,
+                    voiceChannelCode: voiceInfo?.channelCode,
+                    voiceDisplayName: voiceInfo?.displayName,
+                    isActiveVoiceTarget: voiceInfo?.isActiveTarget ?? false,
+                    isMicLive: voiceInfo?.isMicLive ?? false
+                )
+            }
+
             ZStack(alignment: .topLeading) {
-                ForEach(Array(orderedWindows.enumerated()), id: \.element.id) { index, win in
-                    if index < layoutRects.count {
-                        let rect = layoutRects[index]
-                        let isStage = (index == 0 && viewModel.tilingMode != .equalSimultaneousGrid)
-                        InteractiveWindowTileCard(
-                            window: win,
-                            isCenterStage: isStage,
-                            tileIndex: index,
-                            onTapPromote: {
-                                viewModel.promoteWindowToStage(win)
-                            },
-                            onFocusOnly: {
-                                WindowTilingEngine.shared.focusWindow(win)
-                            },
-                            onExclude: {
-                                viewModel.toggleWindowInclusion(win)
-                            }
-                        )
-                        .frame(width: max(80, rect.width), height: max(60, rect.height))
-                        .position(x: rect.midX, y: rect.midY)
-                        .animation(.spring(response: 0.32, dampingFraction: 0.80), value: rect)
-                    }
+                ForEach(telemetryNodes, id: \.window.id) { node in
+                    let isStage = (node.rankIndex == 0 && viewModel.tilingMode != .equalSimultaneousGrid)
+                    InteractiveWindowTileCard(
+                        node: node,
+                        isCenterStage: isStage,
+                        onTapPromote: {
+                            viewModel.promoteWindowToStage(node.window)
+                        },
+                        onFocusOnly: {
+                            WindowTilingEngine.shared.focusWindow(node.window)
+                        },
+                        onExclude: {
+                            viewModel.toggleWindowInclusion(node.window)
+                        }
+                    )
+                    .frame(width: max(80, node.rect.width), height: max(60, node.rect.height))
+                    .position(x: node.rect.midX, y: node.rect.midY)
+                    .animation(.spring(response: 0.32, dampingFraction: 0.80), value: node.rect)
                 }
 
-                // Live Poincaré Hyperbolic Geodesic Web, Parallel-Transport Energy Packets & Golden φ-Spiral Overlay
-                HyperbolicGeodesicWebOverlay(
-                    layoutRects: layoutRects,
+                // Real-Time Causal Telemetry Overlay (ONLY draws real Voice & Active CPU flows — zero fake dots!)
+                MeaningfulGeometryOverlay(
+                    nodes: telemetryNodes,
                     mode: viewModel.tilingMode,
-                    canvasSize: canvasSize
+                    canvasSize: canvasSize,
+                    micVolume: viewModel.systemMicVolume
                 )
             }
             .frame(width: canvasSize.width, height: canvasSize.height)
@@ -619,12 +671,13 @@ struct CenterStagePerimeterCanvas: View {
 }
 
 struct InteractiveWindowTileCard: View {
-    let window: MonitoredWindow
+    let node: WindowTelemetryNode
     let isCenterStage: Bool
-    let tileIndex: Int
     let onTapPromote: () -> Void
     let onFocusOnly: () -> Void
     let onExclude: () -> Void
+
+    private var window: MonitoredWindow { node.window }
 
     private var appThemeColor: Color {
         if let plat = window.platform {
@@ -651,15 +704,13 @@ struct InteractiveWindowTileCard: View {
         let accent = appThemeColor
         let cut: CGFloat = isCenterStage ? 18 : 11
         let tileShape = CockpitChamferShape(topLeftCut: cut, topRightCut: cut, bottomRightCut: cut, bottomLeftCut: cut)
-        let phiScale = pow(Double(MathConstants.invPhi), Double(tileIndex))
-        let hypDist = isCenterStage ? 0.0 : 2.0 * atanh(min(0.95, 0.35 + Double(tileIndex) * 0.09))
-        let camLabel = isCenterStage
-            ? "z₀ = 0 // POINCARÉ APEX"
-            : String(format: "∂𝔻-%02d // φ⁻%d=%.2f", tileIndex + 1, tileIndex, phiScale)
+        let roleBadge = isCenterStage
+            ? String(format: "★ #1 MAIN STAGE · %.0f%% AREA", node.areaPercent)
+            : String(format: "#%d · %.0f%% AREA · TAP TO EXPAND", node.rankIndex + 1, node.areaPercent)
 
         Button(action: onTapPromote) {
             ZStack(alignment: .bottomLeading) {
-                // Background Live Snapshot or Racing Telemetry Viewport
+                // Background Live Window Preview
                 GeometryReader { cardGeo in
                     if let preview = window.previewImage,
                        preview.size.width > 4,
@@ -671,7 +722,7 @@ struct InteractiveWindowTileCard: View {
                             .aspectRatio(contentMode: .fill)
                             .frame(width: cardGeo.size.width, height: cardGeo.size.height)
                             .clipped()
-                            .overlay(Color.black.opacity(isCenterStage ? 0.08 : 0.28))
+                            .overlay(Color.black.opacity(isCenterStage ? 0.06 : 0.26))
                     } else {
                         ZStack {
                             LinearGradient(
@@ -683,7 +734,6 @@ struct InteractiveWindowTileCard: View {
                                 endPoint: .bottomTrailing
                             )
 
-                            // Center Reticle & App Emblem
                             VStack(spacing: isCenterStage ? 10 : 4) {
                                 if let icon = window.appIcon {
                                     Image(nsImage: icon)
@@ -699,8 +749,8 @@ struct InteractiveWindowTileCard: View {
 
                                 if isCenterStage {
                                     HStack(spacing: 8) {
-                                        Image(systemName: "scope")
-                                        Text("LOCKED IN MAIN STAGE // TAP ANY BORDER FEED TO OVERTAKE")
+                                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                        Text("ACTIVE MAIN STAGE // TAP ANY BORDER WINDOW TO SWAP HERE")
                                             .font(.system(size: 11, weight: .black, design: .monospaced))
                                     }
                                     .foregroundColor(Color(red: 0.15, green: 1.0, blue: 0.62))
@@ -727,14 +777,15 @@ struct InteractiveWindowTileCard: View {
 
                 // Top & Bottom Telemetry Overlay Bars
                 VStack(alignment: .leading, spacing: 0) {
-                    // Top Telemetry Strip
+                    // Top Bar: Rank + Area % + App Name + Voice Status + Boost Button
                     HStack(spacing: 6) {
-                        Text(camLabel)
+                        Text(roleBadge)
                             .font(.system(size: isCenterStage ? 10 : 8, weight: .black, design: .monospaced))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2.5)
                             .background(isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62) : accent)
                             .foregroundColor(.black)
+                            .lineLimit(1)
 
                         Text(window.appName.uppercased())
                             .font(.system(size: isCenterStage ? 13 : 10, weight: .black, design: .monospaced))
@@ -743,15 +794,38 @@ struct InteractiveWindowTileCard: View {
 
                         Spacer(minLength: 2)
 
+                        // Voice Channel Badge if this window is Grok Bot (CH-01) or Dot / ChatGPT (CH-02)
+                        if let voiceCode = node.voiceChannelCode {
+                            HStack(spacing: 3) {
+                                Image(systemName: node.isMicLive ? "mic.fill" : "waveform")
+                                    .font(.system(size: 8, weight: .black))
+                                Text(
+                                    node.isMicLive
+                                        ? "\(voiceCode) MIC LIVE"
+                                        : (node.isActiveVoiceTarget ? "\(voiceCode) VOICE TARGET" : voiceCode)
+                                )
+                                .font(.system(size: 8.5, weight: .black, design: .monospaced))
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(
+                                node.isMicLive
+                                    ? Color(red: 0.15, green: 1.0, blue: 0.58)
+                                    : (node.isActiveVoiceTarget ? Color(red: 1.0, green: 0.78, blue: 0.18) : Color.white.opacity(0.18))
+                            )
+                            .foregroundColor(node.isMicLive || node.isActiveVoiceTarget ? .black : .white)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
+
                         if isCenterStage {
                             Button(action: onFocusOnly) {
                                 HStack(spacing: 4) {
                                     Image(systemName: "bolt.fill")
-                                    Text("BOOST TO FRONT")
+                                    Text("BRING TO FRONT")
                                 }
-                                .font(.system(size: 10, weight: .black, design: .monospaced))
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 5)
+                                .font(.system(size: 9.5, weight: .black, design: .monospaced))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
                                 .background(Color(red: 1.0, green: 0.78, blue: 0.15))
                                 .foregroundColor(.black)
                                 .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
@@ -771,28 +845,50 @@ struct InteractiveWindowTileCard: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.78))
+                    .background(Color.black.opacity(0.80))
 
                     Spacer()
 
-                    // Bottom Telemetry Readout
-                    HStack {
+                    // Bottom Bar: Window Title / AI Platform + Real CPU % + Real Window Dimensions
+                    HStack(spacing: 6) {
                         if let plat = window.platform {
                             Text("AI // \(plat.rawValue.uppercased())")
-                                .font(.system(size: 9, weight: .black, design: .monospaced))
+                                .font(.system(size: 8.5, weight: .black, design: .monospaced))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
                                 .background(plat.accentColor)
                                 .foregroundColor(.black)
+                        } else if !window.windowTitle.isEmpty {
+                            Text(window.windowTitle)
+                                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.80))
+                                .lineLimit(1)
                         } else {
                             Text("PID \(window.ownerPID)")
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.65))
                         }
 
                         Spacer()
 
-                        Text(String(format: "dℍ=%.2f · (%d,%d) [%d×%d]", hypDist, Int(window.bounds.origin.x), Int(window.bounds.origin.y), Int(window.bounds.width), Int(window.bounds.height)))
+                        if node.cpuPercent >= 0.4 {
+                            Text(String(format: "⚡ %.1f%% CPU", node.cpuPercent))
+                                .font(.system(size: 8.5, weight: .black, design: .monospaced))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    node.cpuPercent >= 10.0
+                                        ? Color(red: 1.0, green: 0.45, blue: 0.15)
+                                        : Color.black.opacity(0.78)
+                                )
+                                .foregroundColor(
+                                    node.cpuPercent >= 10.0
+                                        ? .black
+                                        : Color(red: 0.15, green: 1.0, blue: 0.62)
+                                )
+                        }
+
+                        Text("\(Int(window.bounds.width))×\(Int(window.bounds.height)) px")
                             .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -801,16 +897,16 @@ struct InteractiveWindowTileCard: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
-                    .background(Color.black.opacity(0.55))
+                    .background(Color.black.opacity(0.65))
                 }
             }
             .clipShape(tileShape)
             .overlay(
                 tileShape.stroke(
-                    isCenterStage
-                        ? Color(red: 0.15, green: 1.0, blue: 0.62)
-                        : accent.opacity(0.65),
-                    lineWidth: isCenterStage ? 3.0 : 1.4
+                    node.isMicLive
+                        ? Color(red: 0.15, green: 1.0, blue: 0.58)
+                        : (isCenterStage ? Color(red: 0.15, green: 1.0, blue: 0.62) : accent.opacity(0.65)),
+                    lineWidth: (isCenterStage || node.isMicLive) ? 3.0 : 1.4
                 )
             )
             .shadow(

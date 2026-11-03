@@ -4,12 +4,12 @@ import SwiftUI
 
 enum MathConstants {
     static let phi: Double = 1.6180339887498949          // Golden Ratio φ = (1 + √5) / 2
-    static let invPhi: Double = 0.6180339887498949       // Conjugate 1/φ = φ - 1
+    static let invPhi: Double = 0.6180339887498949       // Conjugate 1/φ = φ - 1 ≈ 61.8%
     static let goldenAngleRad: Double = 2.399963229728653 // 2π(1 - 1/φ) ≈ 137.507764°
     static let goldenSpiralB: Double = 0.30634896253     // (2 ln φ) / π
 }
 
-// MARK: - 1. Chamfered Supercar / Polytope HUD Polygon Shape
+// MARK: - 1. Chamfered Supercar HUD Polygon Shape
 
 struct CockpitChamferShape: Shape {
     var topLeftCut: CGFloat = 14
@@ -39,38 +39,38 @@ struct CockpitChamferShape: Shape {
     }
 }
 
-// MARK: - 2. Top Shift-Light & Differential Geometry Invariant Strip
+// MARK: - 2. Top Shift-Light & Real System Telemetry Strip
 
 struct ShiftLightRevStrip: View {
     let totalCPULoad: Double      // 0..100+
     let isAnyMicLive: Bool
+    let activeVoiceName: String
+    let layoutExplanation: String
     let isTouchingScreen: Bool
 
     private let ledCount = 24
 
     var body: some View {
-        let normalizedLoad = min(1.0, max(0.18, totalCPULoad / 65.0))
+        let normalizedLoad = min(1.0, max(0.08, totalCPULoad / 65.0))
         let activeLEDs = Int(round(normalizedLoad * Double(ledCount)))
-        // Gaussian curvature proxy K and metric determinant √|g|
-        let curvatureK = -1.0 - (totalCPULoad / 100.0) * 0.618
-        let metricDet = 4.0 / pow(max(0.15, 1.0 - normalizedLoad * 0.45), 2)
 
-        HStack(spacing: 6) {
-            // Left Differential Geometry Invariant Tag
+        HStack(spacing: 8) {
+            // Left: Clear Explanation of Current Geometric Tiling Rule
             HStack(spacing: 6) {
-                Image(systemName: "function")
+                Image(systemName: "rectangle.3.group.fill")
                     .font(.system(size: 10, weight: .black))
                     .foregroundColor(Color(red: 1.0, green: 0.78, blue: 0.18))
-                Text(String(format: "φ=%.5f // K=%.3f // √|g|=%.2f", MathConstants.phi, curvatureK, metricDet))
-                    .font(.system(size: 10, weight: .black, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.9))
+                Text(layoutExplanation)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.92))
+                    .lineLimit(1)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 3)
             .background(Color.white.opacity(0.06))
             .clipShape(CockpitChamferShape(topLeftCut: 5, topRightCut: 5, bottomRightCut: 5, bottomLeftCut: 5))
 
-            // 24-Segment F1 Harmonic Shift Light Array
+            // Center: 24-Segment CPU Load & Voice Activity Strip
             HStack(spacing: 3.5) {
                 ForEach(0..<ledCount, id: \.self) { idx in
                     let isOn = idx < activeLEDs || isTouchingScreen
@@ -84,14 +84,19 @@ struct ShiftLightRevStrip: View {
                 }
             }
 
-            // Right Symplectic / Radio Invariant Tag
+            // Right: Clear Voice Routing & CPU Readout
             HStack(spacing: 6) {
                 Circle()
-                    .fill(isAnyMicLive ? Color(red: 0.15, green: 1.0, blue: 0.55) : Color(red: 0.25, green: 0.82, blue: 1.0))
+                    .fill(isAnyMicLive ? Color(red: 0.15, green: 1.0, blue: 0.55) : Color.white.opacity(0.35))
                     .frame(width: 7, height: 7)
-                Text(isAnyMicLive ? "HOPF FIBRATION: TX LOCKED" : String(format: "ω = %04.0f RAD/S", min(9999, totalCPULoad * 115 + 850)))
-                    .font(.system(size: 10, weight: .black, design: .monospaced))
-                    .foregroundColor(isAnyMicLive ? Color(red: 0.15, green: 1.0, blue: 0.55) : Color(red: 0.25, green: 0.82, blue: 1.0))
+                Text(
+                    isAnyMicLive
+                        ? "🎙️ MIC LIVE → \(activeVoiceName.uppercased())"
+                        : String(format: "🔇 MIC MUTED · TARGET: %@ · CPU %.1f%%", activeVoiceName.uppercased(), totalCPULoad)
+                )
+                .font(.system(size: 10, weight: .black, design: .monospaced))
+                .foregroundColor(isAnyMicLive ? Color(red: 0.15, green: 1.0, blue: 0.55) : Color(red: 0.25, green: 0.82, blue: 1.0))
+                .lineLimit(1)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 3)
@@ -117,7 +122,7 @@ struct ShiftLightRevStrip: View {
     }
 }
 
-// MARK: - 3. Sweeping 240° Tachometer with Inner Rhodonea Rose Curve r(θ) = cos(kθ)
+// MARK: - 3. Clean Proportional 240° Arc Gauge (CPU % and Mic Gain %)
 
 struct CockpitArcGaugeView: View {
     let title: String
@@ -126,49 +131,36 @@ struct CockpitArcGaugeView: View {
     let progress: Double // 0.0 .. 1.0
     let accentColor: Color
     let redlineColor: Color
-    var harmonicK: Double = 3.0 // Rhodonea petal parameter k = p/q
 
     var body: some View {
         let clamped = min(1.0, max(0.0, progress))
 
         ZStack {
-            // Inner Rhodonea Rose Curve r(θ) = R cos(kθ) + Phyllotaxis Golden Ticks
+            // Clean 10% Radial Scale Ticks around the 240° sweep
             Canvas { context, size in
                 let center = CGPoint(x: size.width / 2, y: size.height / 2)
-                let radius = min(size.width, size.height) * 0.36
-                let k = harmonicK + round(clamped * 2.0)
-
-                var rosePath = Path()
-                let steps = 120
-                for i in 0...steps {
-                    let theta = Double(i) / Double(steps) * (2.0 * Double.pi)
-                    let r = Double(radius) * cos(k * theta)
-                    let x = Double(center.x) + r * cos(theta)
-                    let y = Double(center.y) + r * sin(theta)
-                    if i == 0 {
-                        rosePath.move(to: CGPoint(x: x, y: y))
-                    } else {
-                        rosePath.addLine(to: CGPoint(x: x, y: y))
-                    }
-                }
-                context.stroke(rosePath, with: .color(accentColor.opacity(0.24)), lineWidth: 1.0)
-
-                // Golden-angle ticks on unit circle
-                let outerR = Double(min(size.width, size.height) * 0.47)
-                for n in 0..<13 {
-                    let angle = Double(n) * MathConstants.goldenAngleRad
+                let outerR = Double(min(size.width, size.height) * 0.46)
+                for i in 0...10 {
+                    let frac = Double(i) / 10.0
+                    let deg = 146.0 + frac * 245.0
+                    let rad = deg * Double.pi / 180.0
+                    let innerOffset = (i % 5 == 0) ? 5.5 : 3.0
                     let p1 = CGPoint(
-                        x: Double(center.x) + (outerR - 3.0) * cos(angle),
-                        y: Double(center.y) + (outerR - 3.0) * sin(angle)
+                        x: Double(center.x) + (outerR - innerOffset) * cos(rad),
+                        y: Double(center.y) + (outerR - innerOffset) * sin(rad)
                     )
                     let p2 = CGPoint(
-                        x: Double(center.x) + outerR * cos(angle),
-                        y: Double(center.y) + outerR * sin(angle)
+                        x: Double(center.x) + outerR * cos(rad),
+                        y: Double(center.y) + outerR * sin(rad)
                     )
                     var tick = Path()
                     tick.move(to: p1)
                     tick.addLine(to: p2)
-                    context.stroke(tick, with: .color(Color.white.opacity(0.22)), lineWidth: 1)
+                    context.stroke(
+                        tick,
+                        with: .color(frac <= clamped ? accentColor.opacity(0.8) : Color.white.opacity(0.22)),
+                        lineWidth: (i % 5 == 0) ? 1.6 : 1.0
+                    )
                 }
             }
 
@@ -200,7 +192,7 @@ struct CockpitArcGaugeView: View {
             VStack(spacing: 0) {
                 Text(title)
                     .font(.system(size: 7.5, weight: .black, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(.white.opacity(0.65))
                 Text(valueText)
                     .font(.system(size: 15, weight: .black, design: .monospaced))
                     .foregroundColor(.white)
@@ -214,176 +206,248 @@ struct CockpitArcGaugeView: View {
     }
 }
 
-// MARK: - 4. Stereographic Clifford Torus / Hopf Fibration S³ -> ℝ² Phase-Space Orb
+// MARK: - 4. Barycentric 5-Axis System Balance Radar (Shows Where Compute & Voice Are Focused)
 
-struct CliffordHopfAttractorOrb: View {
-    let cpuLoad: Double
-    let isMicLive: Bool
+struct WorkloadBalanceRadarView: View {
+    let grokWeight: Double    // 0..1 (Grok Bot activity / focus)
+    let dotWeight: Double     // 0..1 (Dot / ChatGPT activity / focus)
+    let claudeCodexWeight: Double // 0..1 (Claude / Codex / Antigravity CPU)
+    let voiceMicWeight: Double    // 0..1 (Live Microphone level)
+    let appsWeight: Double        // 0..1 (Browser / Other apps)
+
+    private let labels = ["GROK", "DOT", "AI", "MIC", "APPS"]
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let speed = 0.65 + min(2.5, cpuLoad / 35.0)
-            let phase = t * speed
+        let weights = [
+            min(1.0, max(0.18, grokWeight)),
+            min(1.0, max(0.18, dotWeight)),
+            min(1.0, max(0.18, claudeCodexWeight)),
+            min(1.0, max(0.18, voiceMicWeight)),
+            min(1.0, max(0.18, appsWeight))
+        ]
 
+        ZStack {
             Canvas { context, size in
                 let center = CGPoint(x: size.width / 2, y: size.height / 2)
-                let scale = min(size.width, size.height) * 0.27
+                let radius = min(size.width, size.height) * 0.34
 
-                // Draw 4 interlocking Hopf fibers on the Clifford Torus in S³ projected stereographically to ℝ²
-                let fiberCount = 4
-                let pWinding = 2.0
-                let qWinding = isMicLive ? 5.0 : 3.0
-
-                for f in 0..<fiberCount {
-                    let fiberOffset = Double(f) * (Double.pi / Double(fiberCount))
-                    var path = Path()
-                    let samples = 90
-
-                    for s in 0...samples {
-                        let u = (Double(s) / Double(samples)) * 2.0 * Double.pi
-                        let theta = pWinding * u + phase
-                        let phi = qWinding * u + fiberOffset - phase * 0.618
-
-                        // Point on Clifford Torus in S³ ⊂ ℝ⁴: (cos θ, sin θ, cos φ, sin φ) / √2
-                        let invSqrt2 = 0.70710678118
-                        let x1 = invSqrt2 * cos(theta)
-                        let x2 = invSqrt2 * sin(theta)
-                        let x3 = invSqrt2 * cos(phi)
-                        let x4 = invSqrt2 * sin(phi)
-
-                        // 3D rotation in (x1, x2, x3, x4) before stereographic projection from pole (0,0,0,1.35)
-                        let denom = max(0.32, 1.35 - x4)
-                        let px = x1 / denom
-                        let py = x2 / denom
-                        let pz = x3 / denom
-
-                        // Isometric projection onto 2D instrument plane
-                        let rotA = phase * 0.4
-                        let rx = px * cos(rotA) - pz * sin(rotA)
-                        let ry = py * 0.85 + (px * sin(rotA) + pz * cos(rotA)) * 0.35
-
-                        let pt = CGPoint(
-                            x: center.x + CGFloat(rx) * scale,
-                            y: center.y + CGFloat(ry) * scale
-                        )
-                        if s == 0 {
-                            path.move(to: pt)
-                        } else {
-                            path.addLine(to: pt)
-                        }
+                // Outer reference pentagon & axes
+                var outerPoly = Path()
+                for i in 0..<5 {
+                    let angle = -Double.pi / 2.0 + Double(i) * (2.0 * Double.pi / 5.0)
+                    let vertex = CGPoint(
+                        x: center.x + CGFloat(cos(angle)) * radius,
+                        y: center.y + CGFloat(sin(angle)) * radius
+                    )
+                    if i == 0 {
+                        outerPoly.move(to: vertex)
+                    } else {
+                        outerPoly.addLine(to: vertex)
                     }
 
-                    let fiberColor: Color = (f % 2 == 0)
-                        ? Color(red: 0.15, green: 0.96, blue: 0.68).opacity(0.65)
-                        : Color(red: 1.0, green: 0.52, blue: 0.18).opacity(0.55)
-                    context.stroke(path, with: .color(fiberColor), lineWidth: 1.3)
+                    var spoke = Path()
+                    spoke.move(to: center)
+                    spoke.addLine(to: vertex)
+                    context.stroke(spoke, with: .color(Color.white.opacity(0.15)), lineWidth: 1)
+                }
+                outerPoly.closeSubpath()
+                context.stroke(outerPoly, with: .color(Color.white.opacity(0.25)), lineWidth: 1)
+
+                // Active workload polygon + Barycenter (Center of Mass)
+                var activePoly = Path()
+                var sumX: CGFloat = 0
+                var sumY: CGFloat = 0
+                var totalW: CGFloat = 0
+
+                for i in 0..<5 {
+                    let angle = -Double.pi / 2.0 + Double(i) * (2.0 * Double.pi / 5.0)
+                    let w = CGFloat(weights[i])
+                    let pt = CGPoint(
+                        x: center.x + CGFloat(cos(angle)) * radius * w,
+                        y: center.y + CGFloat(sin(angle)) * radius * w
+                    )
+                    if i == 0 {
+                        activePoly.move(to: pt)
+                    } else {
+                        activePoly.addLine(to: pt)
+                    }
+                    sumX += pt.x * w
+                    sumY += pt.y * w
+                    totalW += w
+                }
+                activePoly.closeSubpath()
+
+                context.fill(activePoly, with: .color(Color(red: 0.15, green: 0.96, blue: 0.65).opacity(0.25)))
+                context.stroke(activePoly, with: .color(Color(red: 0.15, green: 0.96, blue: 0.65)), lineWidth: 1.6)
+
+                // Barycenter (Center-of-Mass) Dot showing where system focus is pulled
+                if totalW > 0 {
+                    let centroid = CGPoint(x: sumX / totalW, y: sumY / totalW)
+                    let dotRect = CGRect(x: centroid.x - 3.5, y: centroid.y - 3.5, width: 7, height: 7)
+                    context.fill(Path(ellipseIn: dotRect), with: .color(Color(red: 1.0, green: 0.78, blue: 0.18)))
                 }
             }
+
+            // Vertex Labels around the Pentagon
+            Text("GROK")
+                .font(.system(size: 6.5, weight: .black, design: .monospaced))
+                .foregroundColor(Color(red: 1.0, green: 0.45, blue: 0.18))
+                .offset(x: 0, y: -32)
+            Text("DOT")
+                .font(.system(size: 6.5, weight: .black, design: .monospaced))
+                .foregroundColor(Color(red: 0.15, green: 0.98, blue: 0.66))
+                .offset(x: 29, y: -10)
+            Text("AI")
+                .font(.system(size: 6.5, weight: .black, design: .monospaced))
+                .foregroundColor(Color(red: 0.25, green: 0.85, blue: 1.0))
+                .offset(x: 20, y: 26)
+            Text("MIC")
+                .font(.system(size: 6.5, weight: .black, design: .monospaced))
+                .foregroundColor(voiceMicWeight > 0.25 ? Color(red: 0.15, green: 1.0, blue: 0.55) : .white.opacity(0.5))
+                .offset(x: -20, y: 26)
+            Text("APPS")
+                .font(.system(size: 6.5, weight: .black, design: .monospaced))
+                .foregroundColor(.white.opacity(0.65))
+                .offset(x: -28, y: -10)
         }
-        .frame(width: 68, height: 68)
+        .frame(width: 76, height: 74)
         .allowsHitTesting(false)
     }
 }
 
-// MARK: - 5. Poincaré Hyperbolic Geodesic Web & Golden Spiral Overlay
+// MARK: - 5. Meaningful Geometric & Causal Telemetry Overlay (No Fake Window-to-Window Dots!)
 
-struct HyperbolicGeodesicWebOverlay: View {
-    let layoutRects: [CGRect]
+struct WindowTelemetryNode {
+    let window: MonitoredWindow
+    let rect: CGRect
+    let rankIndex: Int
+    let areaPercent: Double
+    let cpuPercent: Double
+    let voiceChannelCode: String?  // "CH-01" or "CH-02"
+    let voiceDisplayName: String?  // "Grok Bot" or "Dot"
+    let isActiveVoiceTarget: Bool
+    let isMicLive: Bool
+}
+
+struct MeaningfulGeometryOverlay: View {
+    let nodes: [WindowTelemetryNode]
     let mode: TilingLayoutMode
     let canvasSize: CGSize
+    let micVolume: Float
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
-            let pulsePhase = CGFloat(t.truncatingRemainder(dividingBy: 2.0) / 2.0)
+            let pulsePhase = CGFloat(t.truncatingRemainder(dividingBy: 1.4) / 1.4)
 
-            Canvas { context, size in
-                guard layoutRects.count >= 2 else { return }
-                let diskCenter = CGPoint(x: size.width / 2.0, y: size.height / 2.0)
-                let diskRadius = hypot(size.width, size.height) * 0.52
-
-                // 1. Faint Poincaré Conformal Disk concentric horocycles & hyperbolic metric circles
-                for ring in 1...4 {
-                    let tanhR = CGFloat(tanh(Double(ring) * 0.45))
-                    let r = diskRadius * tanhR * 0.72
-                    let circleRect = CGRect(x: diskCenter.x - r, y: diskCenter.y - r, width: r * 2, height: r * 2)
-                    context.stroke(
-                        Path(ellipseIn: circleRect),
-                        with: .color(Color(red: 0.20, green: 0.85, blue: 1.0).opacity(0.08)),
-                        style: StrokeStyle(lineWidth: 1, dash: [6, 6])
-                    )
-                }
-
-                // 2. If Golden φ-Spiral mode is active, draw the exact Logarithmic Golden Spiral r(θ) = a·φ^(2θ/π)
-                //    and quarter-circle osculating Fibonacci arcs across the chambers!
-                if mode == .goldenFibonacciSpiral {
-                    drawGoldenSpiralCurve(context: &context, rects: layoutRects, size: size)
-                }
-
-                // 3. Draw Poincaré Hyperbolic Geodesic Arcs from Center Stage (c₀) to every Perimeter Window (cₖ)
-                let c0 = CGPoint(x: layoutRects[0].midX, y: layoutRects[0].midY)
-                for idx in 1..<layoutRects.count {
-                    let ck = CGPoint(x: layoutRects[idx].midX, y: layoutRects[idx].midY)
-                    let geoPath = hyperbolicGeodesicQuadPath(from: c0, to: ck, diskCenter: diskCenter)
-
-                    context.stroke(
-                        geoPath,
-                        with: .color(Color(red: 0.15, green: 0.98, blue: 0.66).opacity(0.55)),
-                        style: StrokeStyle(lineWidth: 1.8, dash: [7, 5])
-                    )
-
-                    // Animated parallel-transport energy packet along geodesic ck -> c0
-                    let packetPt = quadBezierPoint(from: ck, to: c0, diskCenter: diskCenter, t: pulsePhase)
-                    let dotRect = CGRect(x: packetPt.x - 4, y: packetPt.y - 4, width: 8, height: 8)
-                    context.fill(Path(ellipseIn: dotRect), with: .color(Color(red: 1.0, green: 0.78, blue: 0.18)))
-
-                    // Draw Simplicial Delaunay perimeter chord to next perimeter node
-                    if idx + 1 < layoutRects.count {
-                        let cNext = CGPoint(x: layoutRects[idx + 1].midX, y: layoutRects[idx + 1].midY)
-                        var chord = Path()
-                        chord.move(to: ck)
-                        chord.addLine(to: cNext)
-                        context.stroke(
-                            chord,
-                            with: .color(Color(red: 1.0, green: 0.45, blue: 0.18).opacity(0.30)),
-                            style: StrokeStyle(lineWidth: 1.0, dash: [3, 4])
-                        )
+            ZStack(alignment: .topLeading) {
+                Canvas { context, size in
+                    // 1. In Golden φ-Spiral mode, draw the Fibonacci Spiral Curve & Golden Section Dividers
+                    //    so it's 100% clear how the Golden Ratio (1.618) is sizing windows #1 -> #2 -> #3 -> #4
+                    if mode == .goldenFibonacciSpiral && nodes.count >= 2 {
+                        drawGoldenSpiralBlueprint(context: &context, rects: nodes.map(\.rect))
                     }
+
+                    // 2. Real Voice Routing Conduit (Left Voice Deck -> Active Voice Target Window: Grok Bot or Dot)
+                    if let voiceNode = nodes.first(where: { $0.isActiveVoiceTarget }) {
+                        let startPt = CGPoint(x: 0, y: voiceNode.rect.midY)
+                        let endPt = CGPoint(x: voiceNode.rect.minX + 12, y: voiceNode.rect.midY)
+                        var conduit = Path()
+                        conduit.move(to: startPt)
+                        conduit.addLine(to: endPt)
+
+                        let conduitColor = voiceNode.isMicLive
+                            ? Color(red: 0.15, green: 1.0, blue: 0.58)
+                            : Color(red: 1.0, green: 0.78, blue: 0.18).opacity(0.55)
+
+                        context.stroke(
+                            conduit,
+                            with: .color(conduitColor),
+                            style: StrokeStyle(
+                                lineWidth: voiceNode.isMicLive ? 3.0 : 1.5,
+                                dash: voiceNode.isMicLive ? [] : [6, 5]
+                            )
+                        )
+
+                        // ONLY animate audio pulses when the Microphone is actually LIVE!
+                        if voiceNode.isMicLive {
+                            for k in 0..<3 {
+                                let frac = (pulsePhase + CGFloat(k) / 3.0).truncatingRemainder(dividingBy: 1.0)
+                                let px = startPt.x + (endPt.x - startPt.x) * frac
+                                let py = startPt.y + (endPt.y - startPt.y) * frac
+                                let radius: CGFloat = 4.0 + CGFloat(micVolume) * 3.0
+                                let dotRect = CGRect(x: px - radius, y: py - radius, width: radius * 2, height: radius * 2)
+                                context.fill(Path(ellipseIn: dotRect), with: .color(Color(red: 0.15, green: 1.0, blue: 0.58)))
+                            }
+                        }
+                    }
+
+                    // 3. Real Active CPU Compute Stream (Right AI Engine Deck -> Windows actively burning >= 1.5% CPU)
+                    for node in nodes where node.cpuPercent >= 1.5 {
+                        let startPt = CGPoint(x: size.width, y: node.rect.midY)
+                        let endPt = CGPoint(x: node.rect.maxX - 12, y: node.rect.midY)
+                        var computeLine = Path()
+                        computeLine.move(to: startPt)
+                        computeLine.addLine(to: endPt)
+
+                        let lineColor = Color(red: 1.0, green: 0.52, blue: 0.16)
+                        context.stroke(
+                            computeLine,
+                            with: .color(lineColor.opacity(0.65)),
+                            style: StrokeStyle(lineWidth: 2.0, dash: [5, 4])
+                        )
+
+                        // Pulse speed scales with actual CPU %
+                        let cpuSpeed = min(3.0, max(0.5, node.cpuPercent / 15.0))
+                        let cpuPhase = CGFloat((t * cpuSpeed).truncatingRemainder(dividingBy: 1.0))
+                        let px = startPt.x + (endPt.x - startPt.x) * cpuPhase
+                        let py = startPt.y + (endPt.y - startPt.y) * cpuPhase
+                        let dotRect = CGRect(x: px - 4, y: py - 4, width: 8, height: 8)
+                        context.fill(Path(ellipseIn: dotRect), with: .color(lineColor))
+                    }
+                }
+
+                // Clear, Self-Explanatory Callout Label on Active Voice Conduit
+                if let voiceNode = nodes.first(where: { $0.isActiveVoiceTarget }) {
+                    let voiceName = (voiceNode.voiceDisplayName ?? voiceNode.window.appName).uppercased()
+                    HStack(spacing: 5) {
+                        Image(systemName: voiceNode.isMicLive ? "waveform.badge.mic" : "mic.slash.fill")
+                            .font(.system(size: 10, weight: .black))
+                        Text(
+                            voiceNode.isMicLive
+                                ? "LIVE MIC AUDIO ──▶ \(voiceName)"
+                                : "VOICE ROUTED TO \(voiceName) (MIC MUTED)"
+                        )
+                        .font(.system(size: 9.5, weight: .black, design: .monospaced))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.88))
+                    .foregroundColor(
+                        voiceNode.isMicLive
+                            ? Color(red: 0.15, green: 1.0, blue: 0.58)
+                            : Color(red: 1.0, green: 0.78, blue: 0.18)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(
+                                voiceNode.isMicLive
+                                    ? Color(red: 0.15, green: 1.0, blue: 0.58)
+                                    : Color(red: 1.0, green: 0.78, blue: 0.18).opacity(0.6),
+                                lineWidth: 1.2
+                            )
+                    )
+                    .position(
+                        x: max(115, voiceNode.rect.minX * 0.5),
+                        y: max(24, min(canvasSize.height - 24, voiceNode.rect.midY - 18))
+                    )
                 }
             }
         }
         .allowsHitTesting(false)
     }
 
-    /// Approximates the orthogonal Poincaré hyperbolic geodesic between p1 and p2
-    /// by bending toward the conformal origin (diskCenter) proportional to chord length.
-    private func hyperbolicGeodesicQuadPath(from p1: CGPoint, to p2: CGPoint, diskCenter: CGPoint) -> Path {
-        let mid = CGPoint(x: (p1.x + p2.x) * 0.5, y: (p1.y + p2.y) * 0.5)
-        // Bend control point inward toward diskCenter (hyperbolic negative curvature K = -1)
-        let ctrl = CGPoint(
-            x: mid.x + (diskCenter.x - mid.x) * 0.34,
-            y: mid.y + (diskCenter.y - mid.y) * 0.34
-        )
-        var path = Path()
-        path.move(to: p1)
-        path.addQuadCurve(to: p2, control: ctrl)
-        return path
-    }
-
-    private func quadBezierPoint(from p1: CGPoint, to p2: CGPoint, diskCenter: CGPoint, t: CGFloat) -> CGPoint {
-        let mid = CGPoint(x: (p1.x + p2.x) * 0.5, y: (p1.y + p2.y) * 0.5)
-        let ctrl = CGPoint(
-            x: mid.x + (diskCenter.x - mid.x) * 0.34,
-            y: mid.y + (diskCenter.y - mid.y) * 0.34
-        )
-        let u = 1.0 - t
-        let x = u * u * p1.x + 2 * u * t * ctrl.x + t * t * p2.x
-        let y = u * u * p1.y + 2 * u * t * ctrl.y + t * t * p2.y
-        return CGPoint(x: x, y: y)
-    }
-
-    private func drawGoldenSpiralCurve(context: inout GraphicsContext, rects: [CGRect], size: CGSize) {
+    private func drawGoldenSpiralBlueprint(context: inout GraphicsContext, rects: [CGRect]) {
         var spiralPath = Path()
         for (i, r) in rects.enumerated() {
             let phase = i % 4
@@ -392,19 +456,19 @@ struct HyperbolicGeodesicWebOverlay: View {
             let ctrlPt: CGPoint
 
             switch phase {
-            case 0: // Left chamber: sweep bottom-left -> top-right
+            case 0: // Left chamber: bottom-left -> top-right
                 startPt = CGPoint(x: r.minX, y: r.maxY)
                 endPt = CGPoint(x: r.maxX, y: r.minY)
                 ctrlPt = CGPoint(x: r.minX, y: r.minY)
-            case 1: // Top chamber: sweep top-left -> bottom-right
+            case 1: // Top chamber: top-left -> bottom-right
                 startPt = CGPoint(x: r.minX, y: r.minY)
                 endPt = CGPoint(x: r.maxX, y: r.maxY)
                 ctrlPt = CGPoint(x: r.maxX, y: r.minY)
-            case 2: // Right chamber: sweep top-right -> bottom-left
+            case 2: // Right chamber: top-right -> bottom-left
                 startPt = CGPoint(x: r.maxX, y: r.minY)
                 endPt = CGPoint(x: r.minX, y: r.maxY)
                 ctrlPt = CGPoint(x: r.maxX, y: r.maxY)
-            default: // Bottom chamber: sweep bottom-right -> top-left
+            default: // Bottom chamber: bottom-right -> top-left
                 startPt = CGPoint(x: r.maxX, y: r.maxY)
                 endPt = CGPoint(x: r.minX, y: r.minY)
                 ctrlPt = CGPoint(x: r.minX, y: r.maxY)
@@ -420,8 +484,8 @@ struct HyperbolicGeodesicWebOverlay: View {
 
         context.stroke(
             spiralPath,
-            with: .color(Color(red: 1.0, green: 0.80, blue: 0.16).opacity(0.82)),
-            style: StrokeStyle(lineWidth: 2.6, lineCap: .round)
+            with: .color(Color(red: 1.0, green: 0.80, blue: 0.16).opacity(0.70)),
+            style: StrokeStyle(lineWidth: 2.2, lineCap: .round, dash: [8, 5])
         )
     }
 }
@@ -456,7 +520,7 @@ struct SegmentedTelemetryBar: View {
     }
 }
 
-// MARK: - 7. Projective Manifold + Golden Ratio Grid Background
+// MARK: - 7. Coordinate Grid + Golden Section Background
 
 struct CockpitCarbonBackground: View {
     var body: some View {
@@ -471,9 +535,8 @@ struct CockpitCarbonBackground: View {
                 endPoint: .bottomTrailing
             )
 
-            // Coordinate Lattice & Golden Ratio Crosshairs
             Canvas { context, size in
-                let gridColor = Color(red: 0.15, green: 0.75, blue: 1.0).opacity(0.045)
+                let gridColor = Color(red: 0.15, green: 0.75, blue: 1.0).opacity(0.04)
                 let step: CGFloat = 48
 
                 var x: CGFloat = 0
@@ -493,20 +556,6 @@ struct CockpitCarbonBackground: View {
                     context.stroke(p, with: .color(gridColor), lineWidth: 1)
                     y += step
                 }
-
-                // Golden section lines x = W/φ and y = H/φ
-                let phiX = size.width * CGFloat(MathConstants.invPhi)
-                let phiY = size.height * CGFloat(MathConstants.invPhi)
-                var goldPath = Path()
-                goldPath.move(to: CGPoint(x: phiX, y: 0))
-                goldPath.addLine(to: CGPoint(x: phiX, y: size.height))
-                goldPath.move(to: CGPoint(x: 0, y: phiY))
-                goldPath.addLine(to: CGPoint(x: size.width, y: phiY))
-                context.stroke(
-                    goldPath,
-                    with: .color(Color(red: 1.0, green: 0.78, blue: 0.18).opacity(0.08)),
-                    style: StrokeStyle(lineWidth: 1, dash: [8, 6])
-                )
             }
         }
     }
@@ -548,7 +597,7 @@ struct HUDCornerBrackets: View {
     }
 }
 
-// MARK: - 9. Multi-Touch Gielis Superformula & Voronoi Simplex Overlay
+// MARK: - 9. Multi-Touch CF15T Reticle & Distance Overlay
 
 struct GeometricTouchSimplexOverlay: View {
     let contacts: [SiSTouchContact]
@@ -560,9 +609,9 @@ struct GeometricTouchSimplexOverlay: View {
             }
 
             ZStack {
-                // Draw Simplicial Chords & Voronoi Perpendicular Bisectors when 2+ fingers touch
+                // Multi-finger distance measurement when 2+ fingers touch the CF15T
                 if points.count >= 2 {
-                    Canvas { context, size in
+                    Canvas { context, _ in
                         for i in 0..<points.count {
                             for j in (i + 1)..<points.count {
                                 let p1 = points[i].pt
@@ -575,35 +624,16 @@ struct GeometricTouchSimplexOverlay: View {
                                     with: .color(Color(red: 0.15, green: 1.0, blue: 0.65).opacity(0.85)),
                                     lineWidth: 2.0
                                 )
-
-                                // Voronoi perpendicular bisector segment
-                                let mid = CGPoint(x: (p1.x + p2.x) * 0.5, y: (p1.y + p2.y) * 0.5)
-                                let dx = p2.x - p1.x
-                                let dy = p2.y - p1.y
-                                let nx = -dy * 0.35
-                                let ny = dx * 0.35
-                                var bisector = Path()
-                                bisector.move(to: CGPoint(x: mid.x - nx, y: mid.y - ny))
-                                bisector.addLine(to: CGPoint(x: mid.x + nx, y: mid.y + ny))
-                                context.stroke(
-                                    bisector,
-                                    with: .color(Color(red: 1.0, green: 0.78, blue: 0.18).opacity(0.75)),
-                                    style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
-                                )
                             }
                         }
                     }
                 }
 
-                // Individual Superformula / Astroid Touch Reticle at each finger
                 ForEach(points, id: \.contact.id) { item in
                     let c = item.contact
                     let pt = item.pt
-                    // Complex plane coordinates z = x + iy in [-1, 1]²
-                    let zx = (c.normalizedX - 0.5) * 2.0
-                    let zy = (0.5 - c.normalizedY) * 2.0
-                    let rNorm = hypot(zx, zy)
-                    let thetaRad = atan2(zy, zx)
+                    let pxX = Int(round(c.normalizedX * 1920))
+                    let pxY = Int(round(c.normalizedY * 1080))
 
                     ZStack {
                         HUDCornerBrackets(
@@ -611,40 +641,23 @@ struct GeometricTouchSimplexOverlay: View {
                             lineWidth: 2.5,
                             length: 18
                         )
-                        .frame(width: 82, height: 82)
-
-                        // Astroid / Superellipse Star
-                        Canvas { ctx, sz in
-                            let center = CGPoint(x: sz.width / 2, y: sz.height / 2)
-                            let R = Double(min(sz.width, sz.height) * 0.44)
-                            var star = Path()
-                            for k in 0...80 {
-                                let a = Double(k) / 80.0 * 2.0 * Double.pi
-                                // 6-fold symmetric superformula
-                                let r = R * (0.78 + 0.22 * cos(6.0 * a))
-                                let px = Double(center.x) + r * cos(a)
-                                let py = Double(center.y) + r * sin(a)
-                                if k == 0 {
-                                    star.move(to: CGPoint(x: px, y: py))
-                                } else {
-                                    star.addLine(to: CGPoint(x: px, y: py))
-                                }
-                            }
-                            ctx.stroke(star, with: .color(Color(red: 1.0, green: 0.42, blue: 0.15)), lineWidth: 2.0)
-                        }
-                        .frame(width: 64, height: 64)
+                        .frame(width: 78, height: 78)
 
                         Circle()
-                            .fill(Color(red: 0.15, green: 1.0, blue: 0.62).opacity(0.28))
-                            .frame(width: 26, height: 26)
+                            .stroke(Color(red: 1.0, green: 0.42, blue: 0.15), lineWidth: 2.0)
+                            .frame(width: 48, height: 48)
 
-                        Text(String(format: "z=%.2f%+.2fi | r=%.2f ∠%.2f rad", zx, zy, rNorm, thetaRad))
-                            .font(.system(size: 9, weight: .black, design: .monospaced))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2.5)
+                        Circle()
+                            .fill(Color(red: 0.15, green: 1.0, blue: 0.62).opacity(0.30))
+                            .frame(width: 22, height: 22)
+
+                        Text("TOUCH (\(pxX), \(pxY) px)")
+                            .font(.system(size: 9.5, weight: .black, design: .monospaced))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
                             .background(Color.black.opacity(0.88))
                             .foregroundColor(Color(red: 0.15, green: 1.0, blue: 0.62))
-                            .offset(y: 52)
+                            .offset(y: 50)
                     }
                     .position(x: pt.x, y: pt.y)
                 }

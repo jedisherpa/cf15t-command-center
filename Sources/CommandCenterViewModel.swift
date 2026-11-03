@@ -128,12 +128,77 @@ final class CommandCenterViewModel: ObservableObject {
         if let currentID = stageWindowID, fetchedWindows.contains(where: { $0.id == currentID }) {
             // Keep existing stage selection
         } else {
-            stageWindowID = fetchedWindows.first?.id
+            // Smart default: prefer active Voice Agent window (Grok Bot or Dot/ChatGPT), then any AI agent, then first window
+            let activeSlot = (activeVoiceSlotID == "slotA") ? slotA : slotB
+            if let voiceWin = fetchedWindows.first(where: { matchesVoiceSlot($0, slot: activeSlot) }) {
+                stageWindowID = voiceWin.id
+            } else if let aiWin = fetchedWindows.first(where: { $0.platform != nil }) {
+                stageWindowID = aiWin.id
+            } else {
+                stageWindowID = fetchedWindows.first?.id
+            }
         }
 
         let scanResult = AgentAndTaskMonitor.shared.scanPlatformsAndTasks(openWindows: fetchedWindows)
         self.agentSnapshots = scanResult.agents
         self.runningTasks = scanResult.tasks
+    }
+
+    // MARK: - Real Per-Window Telemetry & Voice Channel Matching
+
+    func matchesVoiceSlot(_ window: MonitoredWindow, slot: VoiceAssistantConfig) -> Bool {
+        let appLower = window.appName.lowercased()
+        let titleLower = window.windowTitle.lowercased()
+        let targetAppLower = slot.targetAppName.lowercased()
+        let dispLower = slot.displayName.lowercased()
+        return (!targetAppLower.isEmpty && appLower.contains(targetAppLower)) ||
+               (!dispLower.isEmpty && (appLower.contains(dispLower) || titleLower.contains(dispLower)))
+    }
+
+    func voiceSlotMatch(for window: MonitoredWindow) -> (slotID: String, channelCode: String, displayName: String, isActiveTarget: Bool, isMicLive: Bool)? {
+        if matchesVoiceSlot(window, slot: slotA) {
+            return (
+                slotID: "slotA",
+                channelCode: "CH-01",
+                displayName: slotA.displayName,
+                isActiveTarget: activeVoiceSlotID == "slotA",
+                isMicLive: slotA.isMicEnabled && !systemMicMuted
+            )
+        }
+        if matchesVoiceSlot(window, slot: slotB) {
+            return (
+                slotID: "slotB",
+                channelCode: "CH-02",
+                displayName: slotB.displayName,
+                isActiveTarget: activeVoiceSlotID == "slotB",
+                isMicLive: slotB.isMicEnabled && !systemMicMuted
+            )
+        }
+        return nil
+    }
+
+    func cpuPercent(for window: MonitoredWindow) -> Double {
+        if let plat = window.platform,
+           let snap = agentSnapshots.first(where: { $0.platform == plat }) {
+            return snap.cpuPercent
+        }
+        let matchingTasks = runningTasks.filter {
+            $0.pid == window.ownerPID ||
+            $0.commandName.localizedCaseInsensitiveContains(window.appName)
+        }
+        return matchingTasks.reduce(0.0) { $0 + $1.cpuPercent }
+    }
+
+    func memoryMB(for window: MonitoredWindow) -> Double {
+        if let plat = window.platform,
+           let snap = agentSnapshots.first(where: { $0.platform == plat }) {
+            return snap.memoryMB
+        }
+        let matchingTasks = runningTasks.filter {
+            $0.pid == window.ownerPID ||
+            $0.commandName.localizedCaseInsensitiveContains(window.appName)
+        }
+        return matchingTasks.reduce(0.0) { $0 + $1.memoryMB }
     }
 
     func refreshAudioState() {

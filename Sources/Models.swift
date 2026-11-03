@@ -230,17 +230,17 @@ struct VoiceAssistantConfig: Identifiable, Codable, Equatable {
 // MARK: - Window Tiling Layout Modes
 
 enum TilingLayoutMode: String, CaseIterable, Identifiable {
-    case centerStageBorder = "Poincaré Apex + ∂𝔻 Border"
-    case goldenFibonacciSpiral = "Golden φ-Spiral (1.618)"
-    case leftStagePerimeter = "Harmonic Division"
-    case equalSimultaneousGrid = "Isohedral Lattice ℤ²"
-    case dualVoiceSplit = "Symplectic Dual (A ⊕ B)"
+    case centerStageBorder = "Center Stage (62%) + Border Ring"
+    case goldenFibonacciSpiral = "Golden φ-Spiral (Ranked by Size)"
+    case leftStagePerimeter = "Left Stage (62%) + Right Stack"
+    case equalSimultaneousGrid = "Equal Matrix Grid (Uniform 1/N)"
+    case dualVoiceSplit = "Dual Voice Split (Grok 50% ⇄ Dot 50%)"
 
     var id: String { rawValue }
 
     var iconName: String {
         switch self {
-        case .centerStageBorder: return "circle.hexagongrid.fill"
+        case .centerStageBorder: return "viewfinder.rectangular"
         case .goldenFibonacciSpiral: return "hurricane"
         case .leftStagePerimeter: return "sidebar.right"
         case .equalSimultaneousGrid: return "square.grid.2x2.fill"
@@ -250,11 +250,26 @@ enum TilingLayoutMode: String, CaseIterable, Identifiable {
 
     var shortLabel: String {
         switch self {
-        case .centerStageBorder: return "Poincaré ∂𝔻"
+        case .centerStageBorder: return "Focus + Border"
         case .goldenFibonacciSpiral: return "Golden φ-Spiral"
-        case .leftStagePerimeter: return "Harmonic"
-        case .equalSimultaneousGrid: return "ℤ² Lattice"
-        case .dualVoiceSplit: return "Dual A⊕B"
+        case .leftStagePerimeter: return "62/38 Split"
+        case .equalSimultaneousGrid: return "Equal Grid"
+        case .dualVoiceSplit: return "Grok ⇄ Dot 50/50"
+        }
+    }
+
+    var geometryExplanation: String {
+        switch self {
+        case .centerStageBorder:
+            return "Main window gets 62% (φ⁻¹) in Center Stage · All other windows form a perimeter watch-ring"
+        case .goldenFibonacciSpiral:
+            return "Fibonacci Golden Spiral · Windows ranked #1 → #N, each scaled by 1/φ (38% → 24% → 15% → 9%)"
+        case .leftStagePerimeter:
+            return "Golden Section Split · Main window on Left (62% width) · Remaining windows stacked on Right (38%)"
+        case .equalSimultaneousGrid:
+            return "Uniform Matrix Lattice · Every open window gets equal 1/N screen area for side-by-side comparison"
+        case .dualVoiceSplit:
+            return "50/50 Voice Split · Grok Bot on Left half · Dot (ChatGPT) on Right half"
         }
     }
 }
