@@ -33,7 +33,7 @@ final class CursorSnapbackEngine {
             return event
         }
 
-        // Also watch global mouse-up on secondary display (CF15T) if user touches another window on CF15T
+        // Also watch global mouse-up on secondary display (CF15T) if user touches another window on CF15T in Orchestrate mode
         globalMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
             guard let self = self, self.isSnapbackEnabled, NSScreen.screens.count > 1 else { return }
             let currentQuartz = self.currentQuartzCursorPosition()
@@ -84,27 +84,51 @@ final class CursorSnapbackEngine {
         return rect.contains(quartzPt)
     }
 
-    // MARK: - Move Command Center Window to CF15T Display
+    // MARK: - Resolve CF15T Screen (Supports Both Dual-Screen and Lid-Closed Single-Screen Clamshell)
 
-    func moveCommandCenterWindowToCF15T() -> String {
-        guard let window = NSApp.windows.first(where: { $0.isVisible }) else {
-            return "Command Center window not found"
-        }
+    func resolveCF15TScreen() -> NSScreen? {
         let screens = NSScreen.screens
         if screens.count > 1 {
-            // Prefer a 1920x1080 screen or the first external display
-            let targetScreen = screens.dropFirst().first(where: {
+            return screens.dropFirst().first(where: {
                 Int($0.frame.width) == 1920 && Int($0.frame.height) == 1080
             }) ?? screens[1]
+        }
+        return screens.first
+    }
 
-            let vis = targetScreen.visibleFrame
-            window.setFrame(vis, display: true, animate: true)
-            return "Moved Command Center to \(targetScreen.localizedName) (\(Int(targetScreen.frame.width))×\(Int(targetScreen.frame.height)))"
+    // MARK: - Move Command Center Window to CF15T Display (Full Screen or Top Touch Dock)
+
+    func moveCommandCenterWindowToCF15T() -> String {
+        return configureCommandCenterWindowFrame(dockedTopBar: false, dockHeight: 112)
+    }
+
+    func configureCommandCenterWindowFrame(dockedTopBar: Bool, dockHeight: CGFloat = 112) -> String {
+        guard let window = SiSTouchHardwareDriver.shared.targetCommandCenterWindow ?? NSApp.windows.first(where: { $0.isVisible }) else {
+            return "Command Center window not found"
+        }
+        guard let targetScreen = resolveCF15TScreen() else {
+            return "No active display found"
+        }
+
+        let vis = targetScreen.visibleFrame
+        if dockedTopBar {
+            let clampedH = min(vis.height * 0.52, max(96, dockHeight))
+            let dockRect = NSRect(
+                x: vis.minX,
+                y: vis.maxY - clampedH,
+                width: vis.width,
+                height: clampedH
+            )
+            window.minSize = NSSize(width: 640, height: 88)
+            window.level = .floating
+            window.setFrame(dockRect, display: true, animate: true)
+            return "Docked Touch Control Bar at top of \(targetScreen.localizedName) — Live App active below"
         } else {
-            if let main = screens.first {
-                window.setFrame(main.visibleFrame, display: true, animate: true)
-            }
-            return "CF15T not plugged in yet — maximized on built-in display"
+            window.minSize = NSSize(width: 900, height: 540)
+            window.level = .normal
+            window.setFrame(vis, display: true, animate: true)
+            window.makeKeyAndOrderFront(nil)
+            return "Expanded Command Center Matrix on \(targetScreen.localizedName) (\(Int(targetScreen.frame.width))×\(Int(targetScreen.frame.height)))"
         }
     }
 }

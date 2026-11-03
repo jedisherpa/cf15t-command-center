@@ -26,6 +26,15 @@ final class CommandCenterViewModel: ObservableObject {
     @Published var systemMicVolume: Float = 0.85
     @Published var audioInputDeviceName: String = "Built-in Microphone"
 
+    // Dual Operating Modes: ORCHESTRATE (Main Screen Switcher) vs. FULL CONTROL (Laptop Closed / Travel)
+    @Published var operatingMode: CommandCenterOperatingMode = .orchestrate
+    @Published var orchestrateTapAction: OrchestrateTapActionMode = .focusSingleAppOnMain
+    @Published var isFullControlDocked: Bool = false
+    @Published var showTouchKeyboardInDock: Bool = false
+    @Published var quickTypeText: String = ""
+    @Published var isLaptopLidClosed: Bool = false
+    @Published var isClamshellBatterySleepDisabled: Bool = false
+
     // Window Tiling & CF15T Options
     @Published var tilingMode: TilingLayoutMode = .centerStageBorder
     @Published var targetDisplayMode: TargetDisplayMode = .primaryDisplay
@@ -90,12 +99,17 @@ final class CommandCenterViewModel: ObservableObject {
     private let defaultsKeyMaxWindows = "cf15t.ui.maxWindows"
     private let defaultsKeyShowFlowLines = "cf15t.ui.showFlowLines"
     private let defaultsKeyTilingMode = "cf15t.ui.tilingMode"
+    private let defaultsKeyOperatingMode = "cf15t.mode.operatingMode"
+    private let defaultsKeyOrchestrateAction = "cf15t.mode.orchestrateAction"
 
     init() {
         loadVoiceConfigs()
         loadDashboardPreferences()
         isAccessibilityGranted = WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: false)
-        CursorSnapbackEngine.shared.isSnapbackEnabled = cursorSnapbackEnabled
+        isLaptopLidClosed = KeepAwakeWorker.shared.isLaptopLidClosed()
+        isClamshellBatterySleepDisabled = KeepAwakeWorker.shared.isClamshellSleepDisabled()
+
+        applyModeHardwareConfiguration(for: operatingMode, promptClamshellAuth: false)
         CursorSnapbackEngine.shared.startMonitoring()
         KeepAwakeWorker.shared.setKeepAwake(enabled: keepAwakeEnabled)
 
@@ -260,8 +274,27 @@ final class CommandCenterViewModel: ObservableObject {
         connectedScreenCount = NSScreen.screens.count
         isAccessibilityGranted = WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: false)
 
+        let wasLidClosed = isLaptopLidClosed
+        let nowLidClosed = KeepAwakeWorker.shared.isLaptopLidClosed()
+        isLaptopLidClosed = nowLidClosed
+        isClamshellBatterySleepDisabled = KeepAwakeWorker.shared.isClamshellSleepDisabled()
+
         let fetchedWindows = WindowTilingEngine.shared.fetchOpenWindows(capturePreviews: captureImages)
         self.openWindows = fetchedWindows
+
+        // If the user just closed the MacBook lid, automatically switch to FULL CONTROL and pull windows onto CF15T!
+        if !wasLidClosed && nowLidClosed {
+            if operatingMode != .fullControl {
+                setOperatingMode(.fullControl, promptClamshellAuthIfNeeded: false)
+            } else {
+                WindowTilingEngine.shared.gatherAllWindowsOntoDisplay(
+                    windows: fetchedWindows,
+                    targetDisplay: .externalDisplay,
+                    topDockReserveHeight: currentDockReserveHeight
+                )
+            }
+            statusBannerMessage = "Laptop Lid Closed — FULL CONTROL Active on CF15T Touchscreen"
+        }
 
         let currentPool = visibleTiledWindows
         if let currentID = stageWindowID, currentPool.contains(where: { $0.id == currentID }) {
@@ -284,6 +317,163 @@ final class CommandCenterViewModel: ObservableObject {
         let scanResult = AgentAndTaskMonitor.shared.scanPlatformsAndTasks(openWindows: fetchedWindows)
         self.agentSnapshots = scanResult.agents
         self.runningTasks = scanResult.tasks
+    }
+
+    // MARK: - Dual Operating Modes: ORCHESTRATE vs. FULL CONTROL (Travel / Clamshell)
+
+    var currentDockReserveHeight: CGFloat {
+        guard operatingMode == .fullControl && isFullControlDocked else { return 0 }
+        return showTouchKeyboardInDock ? 276 : 112
+    }
+
+    func setOperatingMode(_ mode: CommandCenterOperatingMode, promptClamshellAuthIfNeeded: Bool = true) {
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+            operatingMode = mode
+        }
+        applyModeHardwareConfiguration(for: mode, promptClamshellAuth: promptClamshellAuthIfNeeded)
+        UserDefaults.standard.set(mode.rawValue, forKey: defaultsKeyOperatingMode)
+    }
+
+    private func applyModeHardwareConfiguration(for mode: CommandCenterOperatingMode, promptClamshellAuth: Bool) {
+        switch mode {
+        case .orchestrate:
+            isFullControlDocked = false
+            showTouchKeyboardInDock = false
+            targetDisplayMode = .primaryDisplay
+            cursorSnapbackEnabled = true
+            SiSTouchHardwareDriver.shared.isFullControlSystemTouchMode = false
+            _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(dockedTopBar: false)
+            statusBannerMessage = "ORCHESTRATE MODE — Tap any program on CF15T to switch/tile it on your Main MacBook Screen"
+
+        case .fullControl:
+            keepAwakeEnabled = true
+            targetDisplayMode = .externalDisplay
+            cursorSnapbackEnabled = false
+            SiSTouchHardwareDriver.shared.isFullControlSystemTouchMode = true
+
+            // Gather open windows onto the CF15T screen so nothing is stranded on the laptop display
+            WindowTilingEngine.shared.gatherAllWindowsOntoDisplay(
+                windows: openWindows,
+                targetDisplay: .externalDisplay,
+                topDockReserveHeight: currentDockReserveHeight
+            )
+
+            // Check & optionally arm kernel Clamshell Battery Sleep Lock (pmset disablesleep 1)
+            isClamshellBatterySleepDisabled = KeepAwakeWorker.shared.isClamshellSleepDisabled()
+            if !isClamshellBatterySleepDisabled && promptClamshellAuth {
+                KeepAwakeWorker.shared.setClamshellBatterySleepDisabled(true) { [weak self] ok, msg in
+                    guard let self = self else { return }
+                    self.isClamshellBatterySleepDisabled = KeepAwakeWorker.shared.isClamshellSleepDisabled()
+                    self.statusBannerMessage = msg
+                }
+            } else {
+                statusBannerMessage = isClamshellBatterySleepDisabled
+                    ? "FULL CONTROL ARMED — Safe to close laptop lid! Tap any program to use it directly on CF15T"
+                    : "FULL CONTROL ACTIVE — Tap 'ARM LID-CLOSED LOCK' if closing laptop on battery power"
+            }
+        }
+    }
+
+    func toggleClamshellBatterySleepLock() {
+        let targetState = !KeepAwakeWorker.shared.isClamshellSleepDisabled()
+        KeepAwakeWorker.shared.setClamshellBatterySleepDisabled(targetState) { [weak self] _, msg in
+            guard let self = self else { return }
+            self.isClamshellBatterySleepDisabled = KeepAwakeWorker.shared.isClamshellSleepDisabled()
+            self.statusBannerMessage = msg
+        }
+    }
+
+    func openWindowInFullControlCanvas(_ window: MonitoredWindow) {
+        stageWindowID = window.id
+        if operatingMode != .fullControl {
+            setOperatingMode(.fullControl, promptClamshellAuthIfNeeded: false)
+        }
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.85)) {
+            isFullControlDocked = true
+        }
+        let dockH = currentDockReserveHeight
+        _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(dockedTopBar: true, dockHeight: dockH)
+        WindowTilingEngine.shared.focusAndFillSingleWindow(
+            window,
+            targetDisplay: .externalDisplay,
+            topDockReserveHeight: dockH,
+            fillDisplay: true
+        )
+        statusBannerMessage = "FULL CONTROL: \(window.appName) active on CF15T below Touch Dock"
+    }
+
+    func expandFullControlMatrix() {
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.85)) {
+            isFullControlDocked = false
+            showTouchKeyboardInDock = false
+        }
+        _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(dockedTopBar: false)
+        refreshAll(captureImages: true)
+        statusBannerMessage = "Expanded Full Command Center Matrix on CF15T"
+    }
+
+    func tileAllBelowFullControlDock() {
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.85)) {
+            isFullControlDocked = true
+        }
+        let dockH = currentDockReserveHeight
+        _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(dockedTopBar: true, dockHeight: dockH)
+        applyRealScreenTilingNow(stageWindow: currentStageWindow, promptIfUntrusted: false)
+    }
+
+    func toggleFullControlTouchKeyboard() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+            showTouchKeyboardInDock.toggle()
+        }
+        if isFullControlDocked {
+            let dockH = currentDockReserveHeight
+            _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(dockedTopBar: true, dockHeight: dockH)
+            if let stage = currentStageWindow {
+                WindowTilingEngine.shared.focusAndFillSingleWindow(
+                    stage,
+                    targetDisplay: .externalDisplay,
+                    topDockReserveHeight: dockH,
+                    fillDisplay: true
+                )
+            }
+        }
+    }
+
+    func sendQuickTypeText(pressReturn: Bool = true) {
+        let textToSend = quickTypeText
+        WindowTilingEngine.shared.sendTextToTargetWindow(
+            textToSend,
+            pressReturn: pressReturn,
+            targetWindow: currentStageWindow
+        )
+        if !textToSend.isEmpty {
+            statusBannerMessage = "Sent \"\(textToSend)\" to \(currentStageWindow?.appName ?? "Active App")"
+            quickTypeText = ""
+        }
+    }
+
+    func appendTouchCharacter(_ char: String) {
+        WindowTilingEngine.shared.sendTextToTargetWindow(
+            char,
+            pressReturn: false,
+            targetWindow: currentStageWindow
+        )
+    }
+
+    func sendSpecialKeyToActiveApp(keyCode: CGKeyCode, flags: CGEventFlags = [], label: String) {
+        WindowTilingEngine.shared.sendKeystrokeToTargetWindow(
+            keyCode: keyCode,
+            flags: flags,
+            targetWindow: currentStageWindow
+        )
+        statusBannerMessage = "Sent \(label) to \(currentStageWindow?.appName ?? "Active App")"
+    }
+
+    func scrollActiveApp(deltaY: Int32) {
+        WindowTilingEngine.shared.sendScrollToTargetWindow(
+            deltaY: deltaY,
+            targetWindow: currentStageWindow
+        )
     }
 
     // MARK: - Real Per-Window Telemetry & Voice Channel Matching
@@ -362,12 +552,29 @@ final class CommandCenterViewModel: ObservableObject {
             stageWindowID = window.id
         }
 
-        // Always bring the selected application/window to the front immediately
-        WindowTilingEngine.shared.focusWindow(window)
+        if operatingMode == .fullControl {
+            // In FULL CONTROL (Laptop Closed / Travel) mode, tapping a program docks the Command Center
+            // to the top bar of the CF15T and fills the remaining CF15T screen with that live program!
+            openWindowInFullControlCanvas(window)
+            return
+        }
 
-        if autoTileRealWindowsOnTap && WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: false) {
+        // In ORCHESTRATE mode, switch/focus or tile on the Main MacBook Screen
+        if orchestrateTapAction == .focusSingleAppOnMain {
+            WindowTilingEngine.shared.focusAndFillSingleWindow(
+                window,
+                targetDisplay: targetDisplayMode,
+                topDockReserveHeight: 0,
+                fillDisplay: autoTileRealWindowsOnTap
+            )
+            statusBannerMessage = "ORCHESTRATE: Switched Main Screen to \(window.appName)"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                self?.refreshAll(captureImages: true)
+            }
+        } else if autoTileRealWindowsOnTap && WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: false) {
             applyRealScreenTilingNow(stageWindow: window, promptIfUntrusted: false)
         } else {
+            WindowTilingEngine.shared.focusWindow(window)
             statusBannerMessage = "Switched to \(window.appName) (\(Int(window.bounds.width))×\(Int(window.bounds.height)))"
         }
     }
@@ -394,7 +601,8 @@ final class CommandCenterViewModel: ObservableObject {
             borderWindows: borders,
             mode: tilingMode,
             targetDisplay: targetDisplayMode,
-            stageScale: CGFloat(stageScaleFactor)
+            stageScale: CGFloat(stageScaleFactor),
+            topDockReserveHeight: currentDockReserveHeight
         )
 
         statusBannerMessage = "Tiled \(1 + borders.count) windows (\(tilingMode.shortLabel)) — Stage: \(stage.appName)"
@@ -442,6 +650,8 @@ final class CommandCenterViewModel: ObservableObject {
         d.set(maxTiledWindows, forKey: defaultsKeyMaxWindows)
         d.set(showFloatingFlowLines, forKey: defaultsKeyShowFlowLines)
         d.set(tilingMode.rawValue, forKey: defaultsKeyTilingMode)
+        d.set(operatingMode.rawValue, forKey: defaultsKeyOperatingMode)
+        d.set(orchestrateTapAction.rawValue, forKey: defaultsKeyOrchestrateAction)
 
         statusBannerMessage = "Saved your Program Selection & Dashboard Settings as persistent Defaults"
     }
@@ -458,6 +668,7 @@ final class CommandCenterViewModel: ObservableObject {
         feedFontScale = 1.0
         maxTiledWindows = 8
         showFloatingFlowLines = false
+        orchestrateTapAction = .focusSingleAppOnMain
         saveDashboardPreferencesAsDefaults()
         statusBannerMessage = "Reset to Automatic Program Selection (showing all open programs)"
     }
@@ -499,6 +710,14 @@ final class CommandCenterViewModel: ObservableObject {
         if let tilingRaw = d.string(forKey: defaultsKeyTilingMode),
            let tm = TilingLayoutMode(rawValue: tilingRaw) {
             tilingMode = tm
+        }
+        if let opRaw = d.string(forKey: defaultsKeyOperatingMode),
+           let op = CommandCenterOperatingMode(rawValue: opRaw) {
+            operatingMode = op
+        }
+        if let orchRaw = d.string(forKey: defaultsKeyOrchestrateAction),
+           let oa = OrchestrateTapActionMode(rawValue: orchRaw) {
+            orchestrateTapAction = oa
         }
     }
 

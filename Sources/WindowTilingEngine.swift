@@ -190,12 +190,127 @@ final class WindowTilingEngine {
 
     // MARK: - Physically Tile Real macOS Windows ("Center Stage + Border")
 
+    func focusAndFillSingleWindow(
+        _ window: MonitoredWindow,
+        targetDisplay: TargetDisplayMode,
+        topDockReserveHeight: CGFloat = 0,
+        fillDisplay: Bool = true
+    ) {
+        if savedOriginalFrames[window.id] == nil {
+            savedOriginalFrames[window.id] = window.bounds
+        }
+
+        if fillDisplay && isAccessibilityTrusted(promptIfNeeded: false) {
+            var canvas = resolveTargetCanvas(for: window, displayMode: targetDisplay)
+            if topDockReserveHeight > 0 && canvas.height > topDockReserveHeight + 160 {
+                canvas.origin.y += topDockReserveHeight
+                canvas.size.height -= topDockReserveHeight
+            }
+            let insetFrame = sanitizeRect(canvas.insetBy(dx: 8, dy: 8)).integral
+            applyFrame(insetFrame, to: window, raise: true, activateApp: true)
+        }
+        focusWindow(window)
+    }
+
+    func gatherAllWindowsOntoDisplay(
+        windows: [MonitoredWindow],
+        targetDisplay: TargetDisplayMode,
+        topDockReserveHeight: CGFloat = 0
+    ) {
+        guard isAccessibilityTrusted(promptIfNeeded: false) else { return }
+        for win in windows where win.id != 999_999 {
+            var canvas = resolveTargetCanvas(for: win, displayMode: targetDisplay)
+            if topDockReserveHeight > 0 && canvas.height > topDockReserveHeight + 160 {
+                canvas.origin.y += topDockReserveHeight
+                canvas.size.height -= topDockReserveHeight
+            }
+            // If window center is not currently inside target canvas, move & clamp it inside
+            let center = CGPoint(x: win.bounds.midX, y: win.bounds.midY)
+            if !canvas.insetBy(dx: -40, dy: -40).contains(center) {
+                let targetFrame = sanitizeRect(canvas.insetBy(dx: 12, dy: 12)).integral
+                applyFrame(targetFrame, to: win, raise: false, activateApp: false)
+            }
+        }
+    }
+
+    func sendKeystrokeToTargetWindow(
+        keyCode: CGKeyCode,
+        flags: CGEventFlags = [],
+        targetWindow: MonitoredWindow?
+    ) {
+        if let win = targetWindow, win.id != 999_999 {
+            focusWindow(win)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            let src = CGEventSource(stateID: .hidSystemState)
+            if let down = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: true),
+               let up = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: false) {
+                down.flags = flags
+                up.flags = flags
+                down.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
+            }
+        }
+    }
+
+    func sendTextToTargetWindow(
+        _ text: String,
+        pressReturn: Bool,
+        targetWindow: MonitoredWindow?
+    ) {
+        guard !text.isEmpty || pressReturn else { return }
+        if let win = targetWindow, win.id != 999_999 {
+            focusWindow(win)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            let src = CGEventSource(stateID: .hidSystemState)
+            if !text.isEmpty {
+                let utf16Chars = Array(text.utf16)
+                if let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
+                   let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) {
+                    down.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
+                    up.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
+                    down.post(tap: .cghidEventTap)
+                    up.post(tap: .cghidEventTap)
+                }
+            }
+            if pressReturn {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    if let retDown = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: true),
+                       let retUp = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: false) {
+                        retDown.post(tap: .cghidEventTap)
+                        retUp.post(tap: .cghidEventTap)
+                    }
+                }
+            }
+        }
+    }
+
+    func sendScrollToTargetWindow(deltaY: Int32, targetWindow: MonitoredWindow?) {
+        if let win = targetWindow, win.id != 999_999 {
+            let targetPt = CGPoint(x: win.bounds.midX, y: win.bounds.midY)
+            CGWarpMouseCursorPosition(targetPt)
+            CGAssociateMouseAndMouseCursorPosition(1)
+        }
+        if let scrollEv = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 1,
+            wheel1: deltaY,
+            wheel2: 0,
+            wheel3: 0
+        ) {
+            scrollEv.post(tap: .cghidEventTap)
+        }
+    }
+
     func tileWindowsOnScreen(
         stageWindow: MonitoredWindow,
         borderWindows: [MonitoredWindow],
         mode: TilingLayoutMode,
         targetDisplay: TargetDisplayMode,
-        stageScale: CGFloat = 0.62
+        stageScale: CGFloat = 0.62,
+        topDockReserveHeight: CGFloat = 0
     ) {
         let allToTile = [stageWindow] + borderWindows.filter { $0.id != stageWindow.id }
         guard !allToTile.isEmpty else { return }
@@ -207,7 +322,11 @@ final class WindowTilingEngine {
             }
         }
 
-        let canvas = resolveTargetCanvas(for: stageWindow, displayMode: targetDisplay)
+        var canvas = resolveTargetCanvas(for: stageWindow, displayMode: targetDisplay)
+        if topDockReserveHeight > 0 && canvas.height > topDockReserveHeight + 160 {
+            canvas.origin.y += topDockReserveHeight
+            canvas.size.height -= topDockReserveHeight
+        }
         let frames = computeLayoutFrames(
             count: allToTile.count,
             canvas: canvas,

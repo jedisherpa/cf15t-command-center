@@ -351,3 +351,53 @@ enum TargetDisplayMode: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 }
+
+// MARK: - Dual Operating Modes: ORCHESTRATE vs. FULL CONTROL (Travel / Clamshell)
+
+enum CommandCenterOperatingMode: String, CaseIterable, Identifiable, Codable {
+    case orchestrate = "ORCHESTRATE"
+    case fullControl = "FULL CONTROL"
+
+    var id: String { rawValue }
+
+    var titleLabel: String {
+        switch self {
+        case .orchestrate:
+            return "ORCHESTRATE (MAIN SCREEN SWITCHER)"
+        case .fullControl:
+            return "FULL CONTROL (LAPTOP CLOSED / TRAVEL)"
+        }
+    }
+
+    var shortSubtitle: String {
+        switch self {
+        case .orchestrate:
+            return "Tap CF15T to switch & tile apps on your Main MacBook Screen · Cursor snaps back"
+        case .fullControl:
+            return "Close laptop lid in Ubers/trains · Run & touch all apps directly on CF15T"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .orchestrate:
+            return "rectangle.on.rectangle.angled"
+        case .fullControl:
+            return "ipad.landscape.badge.play"
+        }
+    }
+}
+
+enum OrchestrateTapActionMode: String, CaseIterable, Identifiable, Codable {
+    case focusSingleAppOnMain = "Switch & Focus App on Main Screen"
+    case tileAllOnMain = "Tile Center Stage + Border on Main Screen"
+
+    var id: String { rawValue }
+
+    var shortLabel: String {
+        switch self {
+        case .focusSingleAppOnMain: return "1-Tap App Switcher"
+        case .tileAllOnMain: return "Tile All Windows"
+        }
+    }
+}

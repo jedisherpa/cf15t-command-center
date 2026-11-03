@@ -18,6 +18,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupMenuBarStatusItem()
         createAndShowMainWindow()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleScreenParametersChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleScreenParametersChanged() {
+        Task { @MainActor in
+            let isDocked = (viewModel.operatingMode == .fullControl && viewModel.isFullControlDocked)
+            _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(
+                dockedTopBar: isDocked,
+                dockHeight: viewModel.currentDockReserveHeight
+            )
+            viewModel.refreshAll(captureImages: true)
+            if viewModel.operatingMode == .fullControl || viewModel.isLaptopLidClosed {
+                WindowTilingEngine.shared.gatherAllWindowsOntoDisplay(
+                    windows: viewModel.openWindows,
+                    targetDisplay: .externalDisplay,
+                    topDockReserveHeight: viewModel.currentDockReserveHeight
+                )
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -84,6 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.addItem(withTitle: "Show CF15T Command Center", action: #selector(showMainWindowAction), keyEquivalent: "0")
+        menu.addItem(withTitle: "Mode 1: ORCHESTRATE (Main Screen Switcher)", action: #selector(switchToOrchestrateAction), keyEquivalent: "1")
+        menu.addItem(withTitle: "Mode 2: FULL CONTROL (Laptop Closed / Travel)", action: #selector(switchToFullControlAction), keyEquivalent: "2")
+        menu.addItem(withTitle: "Settings & Program Selection...", action: #selector(openSettingsAction), keyEquivalent: ",")
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Swap Voice Assistant (Grok Bot ⇄ Dot)", action: #selector(swapVoiceAction), keyEquivalent: "g")
         menu.addItem(withTitle: "Toggle Master Microphone Mute", action: #selector(toggleMasterMicAction), keyEquivalent: "m")
         menu.addItem(withTitle: "Toggle Keep-Awake (Prevent Sleep & Screensaver)", action: #selector(toggleKeepAwakeAction), keyEquivalent: "k")
@@ -101,6 +130,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showMainWindowAction() {
+        if viewModel.operatingMode == .fullControl && viewModel.isFullControlDocked {
+            viewModel.expandFullControlMatrix()
+        }
+        mainWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func switchToOrchestrateAction() {
+        viewModel.setOperatingMode(.orchestrate)
+    }
+
+    @objc private func switchToFullControlAction() {
+        viewModel.setOperatingMode(.fullControl, promptClamshellAuthIfNeeded: true)
+    }
+
+    @objc private func openSettingsAction() {
+        if viewModel.operatingMode == .fullControl && viewModel.isFullControlDocked {
+            viewModel.expandFullControlMatrix()
+        }
+        viewModel.isShowingSettingsSheet = true
         mainWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

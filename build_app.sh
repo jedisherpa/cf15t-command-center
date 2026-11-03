@@ -69,6 +69,7 @@ swiftc \
     "$PROJECT_DIR/Sources/CockpitHUDComponents.swift" \
     "$PROJECT_DIR/Sources/VoiceSlotEditorSheet.swift" \
     "$PROJECT_DIR/Sources/CommandCenterSettingsSheet.swift" \
+    "$PROJECT_DIR/Sources/FullControlTouchDockView.swift" \
     "$PROJECT_DIR/Sources/CommandCenterViews.swift" \
     "$PROJECT_DIR/Sources/CF15TCommandCenterApp.swift" \
     -o "$MACOS_DIR/CF15TCommandCenter"

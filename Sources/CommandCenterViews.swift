@@ -26,74 +26,83 @@ struct CommandCenterMainView: View {
             : viewModel.slotB.displayName
         let isMicLive = (viewModel.slotA.isMicEnabled || viewModel.slotB.isMicEnabled) && !viewModel.systemMicMuted
 
-        VStack(spacing: 10) {
-            // 0. Top System Telemetry & Geometric Layout Rule Strip
-            ShiftLightRevStrip(
-                totalCPULoad: totalSystemCPULoad,
-                isAnyMicLive: isMicLive,
-                activeVoiceName: activeVoiceName,
-                layoutExplanation: viewModel.tilingMode.geometryExplanation,
-                isTouchingScreen: viewModel.sisIsTouching
-            )
+        Group {
+            if viewModel.operatingMode == .fullControl && viewModel.isFullControlDocked {
+                FullControlDockedTopBarView(viewModel: viewModel)
+            } else {
+                VStack(spacing: 8) {
+                    // 0. Top System Telemetry & Geometric Layout Rule Strip
+                    ShiftLightRevStrip(
+                        totalCPULoad: totalSystemCPULoad,
+                        isAnyMicLive: isMicLive,
+                        activeVoiceName: activeVoiceName,
+                        layoutExplanation: viewModel.tilingMode.geometryExplanation,
+                        isTouchingScreen: viewModel.sisIsTouching
+                    )
 
-            // 1. Voice Switchboard (Grok Bot <-> Dot) + Twin Gauges + 5-Axis Workload Balance Radar
-            TopVoiceAndSystemBar(
-                viewModel: viewModel,
-                totalCPULoad: totalSystemCPULoad,
-                currentGear: currentGearNumber
-            )
+                    // 0.5. Dual Operating Mode Switcher: ORCHESTRATE (Main Screen) vs. FULL CONTROL (Laptop Closed / Travel)
+                    DualOperatingModeSwitcherBanner(viewModel: viewModel)
 
-            // 2. Main Adjustable Split Cockpit: Window Tiling Matrix (Left) | Draggable Handle | AI Engines & Tasks (Right)
-            GeometryReader { geo in
-                let totalW = geo.size.width
-                let leftWidth = viewModel.isRightPanelCollapsed
-                    ? totalW
-                    : max(540, min(totalW - 260, floor(totalW * CGFloat(viewModel.matrixWidthRatio))))
+                    // 1. Voice Switchboard (Grok Bot <-> Dot) + Twin Gauges + 5-Axis Workload Balance Radar
+                    TopVoiceAndSystemBar(
+                        viewModel: viewModel,
+                        totalCPULoad: totalSystemCPULoad,
+                        currentGear: currentGearNumber
+                    )
 
-                HStack(spacing: 6) {
-                    WindowTilingArenaPanel(viewModel: viewModel, currentGear: currentGearNumber)
-                        .frame(width: leftWidth)
+                    // 2. Main Adjustable Split Cockpit: Window Tiling Matrix (Left) | Draggable Handle | AI Engines & Tasks (Right)
+                    GeometryReader { geo in
+                        let totalW = geo.size.width
+                        let leftWidth = viewModel.isRightPanelCollapsed
+                            ? totalW
+                            : max(540, min(totalW - 260, floor(totalW * CGFloat(viewModel.matrixWidthRatio))))
 
-                    if !viewModel.isRightPanelCollapsed {
-                        // Draggable Split Divider Handle
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.white.opacity(0.10))
-                                .frame(width: 6)
-                            VStack(spacing: 3) {
-                                ForEach(0..<4, id: \.self) { _ in
-                                    Circle()
-                                        .fill(Color(red: 0.20, green: 0.88, blue: 1.0))
-                                        .frame(width: 3.5, height: 3.5)
+                        HStack(spacing: 6) {
+                            WindowTilingArenaPanel(viewModel: viewModel, currentGear: currentGearNumber)
+                                .frame(width: leftWidth)
+
+                            if !viewModel.isRightPanelCollapsed {
+                                // Draggable Split Divider Handle
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(Color.white.opacity(0.10))
+                                        .frame(width: 6)
+                                    VStack(spacing: 3) {
+                                        ForEach(0..<4, id: \.self) { _ in
+                                            Circle()
+                                                .fill(Color(red: 0.20, green: 0.88, blue: 1.0))
+                                                .frame(width: 3.5, height: 3.5)
+                                        }
+                                    }
                                 }
+                                .frame(width: 8)
+                                .contentShape(Rectangle())
+                                .gesture(
+                                    DragGesture(minimumDistance: 2)
+                                        .onChanged { value in
+                                            let newX = max(540, min(totalW - 260, value.location.x + leftWidth))
+                                            viewModel.matrixWidthRatio = Double(newX / max(1, totalW))
+                                        }
+                                )
+                                .help("Drag left or right to resize the Window Tiling Matrix vs AI Engines panel")
+
+                                AgentAndTasksSidePanel(viewModel: viewModel)
+                                    .frame(maxWidth: .infinity)
                             }
                         }
-                        .frame(width: 8)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 2)
-                                .onChanged { value in
-                                    let newX = max(540, min(totalW - 260, value.location.x + leftWidth))
-                                    viewModel.matrixWidthRatio = Double(newX / max(1, totalW))
-                                }
-                        )
-                        .help("Drag left or right to resize the Window Tiling Matrix vs AI Engines panel")
-
-                        AgentAndTasksSidePanel(viewModel: viewModel)
-                            .frame(maxWidth: .infinity)
                     }
-                }
-            }
 
-            // 3. Bottom Control & Status Strip
-            BottomStatusStrip(viewModel: viewModel)
+                    // 3. Bottom Control & Status Strip
+                    BottomStatusStrip(viewModel: viewModel)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(CockpitCarbonBackground())
+                .overlay(
+                    GeometricTouchSimplexOverlay(contacts: viewModel.sisActiveContacts)
+                )
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(CockpitCarbonBackground())
-        .overlay(
-            GeometricTouchSimplexOverlay(contacts: viewModel.sisActiveContacts)
-        )
         .sheet(isPresented: $viewModel.isShowingVoiceSlotEditor) {
             VoiceSlotEditorSheet(viewModel: viewModel)
         }
