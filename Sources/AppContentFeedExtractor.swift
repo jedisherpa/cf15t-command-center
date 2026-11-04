@@ -61,11 +61,13 @@ final class AppContentFeedExtractor {
             // Crop to the main conversation & workspace area so it shows the active chat clearly
             let bid = (window.bundleIdentifier ?? "").lowercased()
             if w > 640 && (appLower.contains("grok") || bid.contains("com.anysphere.sand")) {
-                // Grok Bot: left 31% is the bot/thread list sidebar; bottom-right 69% is the active bot response
-                cropX = w * 0.31
-                cropW = w * 0.69
-                cropY = h * 0.36
-                cropH = h * 0.57
+                if let composite = buildGrokBotSplitPanelImage(from: cgImage) {
+                    return composite
+                }
+                cropX = 0
+                cropW = w * 0.88
+                cropY = h * 0.04
+                cropH = h * 0.92
             } else if w > 900 && (window.platform == .codex || bid.contains("com.openai.codex") || appLower.contains("codex")) {
                 cropX = w * 0.22
                 cropW = w * 0.76
@@ -113,6 +115,87 @@ final class AppContentFeedExtractor {
             return fullImage
         }
         return NSImage(cgImage: croppedCG, size: NSSize(width: croppedCG.width, height: croppedCG.height))
+    }
+
+    /// Combines Grok Bot's left-hand Agents Side Panel and right-hand Active Conversation into a wide,
+    /// side-by-side cockpit view with zero empty right-hand margin so both panels are large and readable.
+    private func buildGrokBotSplitPanelImage(from cgImage: CGImage) -> NSImage? {
+        let w = CGFloat(cgImage.width)
+        let h = CGFloat(cgImage.height)
+        let sidebarRect = CGRect(
+            x: floor(w * 0.005),
+            y: floor(h * 0.045),
+            width: floor(w * 0.325),
+            height: floor(h * 0.90)
+        )
+        let chatRect = CGRect(
+            x: floor(w * 0.335),
+            y: floor(h * 0.30),
+            width: floor(w * 0.535),
+            height: floor(h * 0.66)
+        )
+        guard let sidebarCG = cgImage.cropping(to: sidebarRect),
+              let chatCG = cgImage.cropping(to: chatRect) else {
+            return nil
+        }
+
+        let canvasH = sidebarCG.height
+        let sidebarW = Int(CGFloat(sidebarCG.width) * 1.12)
+        let dividerW = 6
+        let chatScale = CGFloat(canvasH) / CGFloat(max(1, chatCG.height))
+        let chatW = Int(CGFloat(chatCG.width) * chatScale)
+        let canvasW = sidebarW + dividerW + chatW
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: canvasW,
+            height: canvasH,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+
+        ctx.interpolationQuality = .high
+        ctx.setFillColor(CGColor(red: 0.05, green: 0.05, blue: 0.06, alpha: 1.0))
+        ctx.fill(CGRect(x: 0, y: 0, width: canvasW, height: canvasH))
+
+        ctx.draw(sidebarCG, in: CGRect(x: 0, y: 0, width: sidebarW, height: canvasH))
+
+        ctx.setFillColor(CGColor(red: 0.25, green: 0.27, blue: 0.32, alpha: 1.0))
+        ctx.fill(CGRect(x: sidebarW + 2, y: 0, width: 2, height: canvasH))
+
+        ctx.draw(chatCG, in: CGRect(x: sidebarW + dividerW, y: 0, width: chatW, height: canvasH))
+
+        guard let outCG = ctx.makeImage() else { return nil }
+        return NSImage(cgImage: outCG, size: NSSize(width: outCG.width, height: outCG.height))
+    }
+
+    private func cropGrokBotChatOnlyImage(from fullImage: NSImage?) -> NSImage? {
+        guard let fullImage = fullImage,
+              let cgImage = fullImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+        let w = CGFloat(cgImage.width)
+        let h = CGFloat(cgImage.height)
+        let rect = CGRect(x: floor(w * 0.33), y: floor(h * 0.32), width: floor(w * 0.65), height: floor(h * 0.63))
+        guard let cropped = cgImage.cropping(to: rect) else { return fullImage }
+        return NSImage(cgImage: cropped, size: NSSize(width: cropped.width, height: cropped.height))
+    }
+
+    private func cropGrokBotSidebarOnlyImage(from fullImage: NSImage?) -> NSImage? {
+        guard let fullImage = fullImage,
+              let cgImage = fullImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+        let w = CGFloat(cgImage.width)
+        let h = CGFloat(cgImage.height)
+        let rect = CGRect(x: floor(w * 0.04), y: floor(h * 0.25), width: floor(w * 0.285), height: floor(h * 0.68))
+        guard let cropped = cgImage.cropping(to: rect) else { return nil }
+        return NSImage(cgImage: cropped, size: NSSize(width: cropped.width, height: cropped.height))
     }
 
     // MARK: - 2. Public Digest Extraction Entry Point
@@ -214,14 +297,22 @@ final class AppContentFeedExtractor {
         var finalBlocks = axBlocks
         let substantiveAXCount = axBlocks.filter { $0.text.count >= 18 }.count
         if substantiveAXCount < 4 || isGrokBot {
-            let sourceImage = window.focusedContentImage ?? cropActiveConversationImage(from: window.previewImage, for: window) ?? window.previewImage
+            let sourceImage: NSImage? = isGrokBot
+                ? (cropGrokBotChatOnlyImage(from: window.previewImage) ?? window.previewImage)
+                : (window.focusedContentImage ?? cropActiveConversationImage(from: window.previewImage, for: window) ?? window.previewImage)
             if let img = sourceImage {
                 let ocrBlocks = extractVisionOCRBlocks(from: img, windowBounds: window.bounds).filter { blk in
                     let l = blk.text.lowercased()
-                    return !l.hasPrefix("+ message") && l != "handling it" && !l.hasPrefix("today ")
+                    return !l.hasPrefix("+ message") && l != "handling it" && l != "getting it done" && !l.hasPrefix("today ")
                 }
                 if isGrokBot {
-                    finalBlocks = ocrBlocks
+                    var sidebarBlocks: [SpatialTextBlock] = []
+                    if let sideImg = cropGrokBotSidebarOnlyImage(from: window.previewImage) {
+                        sidebarBlocks = Array(extractVisionOCRBlocks(from: sideImg, windowBounds: window.bounds).filter {
+                            !$0.text.lowercased().contains("more unreads")
+                        }.prefix(4))
+                    }
+                    finalBlocks = sidebarBlocks + ocrBlocks
                 } else if ocrBlocks.count > finalBlocks.count || substantiveAXCount < 2 {
                     finalBlocks = mergeAXAndOCRBlocks(axBlocks: axBlocks, ocrBlocks: ocrBlocks)
                 }

@@ -838,7 +838,7 @@ struct RaceLiveScreen: View {
         Button(action: {
             showWholeWindow.toggle()
         }) {
-            ZStack(alignment: .topLeading) {
+            ZStack(alignment: .topTrailing) {
                 inner.fill(Color(red: 0.04, green: 0.04, blue: 0.055))
 
                 if hasValidImg, let img = activeImg {
