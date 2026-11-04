@@ -5,9 +5,13 @@ import Vision
 final class AppContentFeedExtractor {
     static let shared = AppContentFeedExtractor()
 
+    private let cacheLock = NSLock()
     private var enabledManualAXPIDs: Set<pid_t> = []
     private var cachedDigests: [CGWindowID: (timestamp: TimeInterval, digest: WindowLiveDigest)] = [:]
-    private let cacheTTL: TimeInterval = 1.6
+    private let cacheTTL: TimeInterval = 2.4
+
+    private var cachedAgyDigest: (path: String, modDate: Date, digest: WindowLiveDigest)?
+    private var cachedCodexDigestByTitle: [String: (path: String, modDate: Date, scannedAt: TimeInterval, digest: WindowLiveDigest)] = [:]
 
     // Noise UI labels to ignore when extracting real conversation / thread content
     private let ignoredChromeLabels: Set<String> = [
@@ -107,13 +111,63 @@ final class AppContentFeedExtractor {
 
     // MARK: - 2. Public Digest Extraction Entry Point
 
+    /// Non-blocking main-thread lookup: returns the cached digest or a lightweight placeholder without doing I/O or OCR.
+    func cachedOrFallbackDigest(for window: MonitoredWindow) -> WindowLiveDigest {
+        if let existing = window.liveDigest {
+            return existing
+        }
+        cacheLock.lock()
+        let hit = cachedDigests[window.id]?.digest
+        cacheLock.unlock()
+        if let hit = hit {
+            return hit
+        }
+        let style = classifyStyle(for: window)
+        let topic = window.windowTitle.isEmpty ? window.appName : window.windowTitle
+        return WindowLiveDigest(
+            style: style,
+            contextTitle: topic,
+            statusBadge: "● READY",
+            lines: []
+        )
+    }
+
+    /// Immediately appends a user prompt into the cached digest so button presses reflect in < 1ms on screen.
+    func appendInstantUserPrompt(_ prompt: String, to window: MonitoredWindow) -> WindowLiveDigest {
+        let base = cachedOrFallbackDigest(for: window)
+        var lines = base.lines
+        let newLine = DigestFeedLine(
+            id: "user-instant-\(Int(Date().timeIntervalSince1970 * 1000))",
+            speakerOrTag: "🗣️ YOU",
+            text: prompt,
+            isIncomingOrAgent: false,
+            isHighlighted: true
+        )
+        lines.append(newLine)
+        let updated = WindowLiveDigest(
+            style: base.style,
+            contextTitle: "Sent: \"\(prompt.prefix(60))\"",
+            statusBadge: "📤 COMMAND SENT",
+            lines: Array(lines.suffix(6))
+        )
+        let now = Date().timeIntervalSinceReferenceDate
+        cacheLock.lock()
+        cachedDigests[window.id] = (now + 2.5, updated)
+        cacheLock.unlock()
+        return updated
+    }
+
     func extractLiveDigest(for window: MonitoredWindow, forceRefresh: Bool = false) -> WindowLiveDigest {
         let now = Date().timeIntervalSinceReferenceDate
-        if !forceRefresh,
-           let cached = cachedDigests[window.id],
-           (now - cached.timestamp) < cacheTTL,
-           !cached.digest.lines.isEmpty {
-            return cached.digest
+        if !forceRefresh {
+            cacheLock.lock()
+            let cached = cachedDigests[window.id]
+            cacheLock.unlock()
+            if let cached = cached,
+               (now - cached.timestamp) < cacheTTL,
+               !cached.digest.lines.isEmpty {
+                return cached.digest
+            }
         }
 
         let style = classifyStyle(for: window)
@@ -123,7 +177,9 @@ final class AppContentFeedExtractor {
            window.appName.localizedCaseInsensitiveContains("Antigravity") ||
            window.windowTitle.localizedCaseInsensitiveContains("Antigravity") {
             if let agyDigest = buildAntigravityLiveDigest(window: window) {
+                cacheLock.lock()
                 cachedDigests[window.id] = (now, agyDigest)
+                cacheLock.unlock()
                 return agyDigest
             }
         }
@@ -134,7 +190,9 @@ final class AppContentFeedExtractor {
            bundleLower.contains("com.openai.codex") ||
            window.appName.localizedCaseInsensitiveContains("Codex") {
             if let codexDigest = buildCodexLiveDigest(window: window) {
+                cacheLock.lock()
                 cachedDigests[window.id] = (now, codexDigest)
+                cacheLock.unlock()
                 return codexDigest
             }
         }
@@ -145,10 +203,10 @@ final class AppContentFeedExtractor {
             return lower != window.appName.lowercased() && lower != window.windowTitle.lowercased()
         }
 
-        // 3. Fuse with Apple Vision OCR on the live window image whenever AX has fewer than 6 substantive lines
+        // 3. Fuse with Apple Vision OCR on the live window image whenever AX has fewer than 5 substantive lines
         var finalBlocks = axBlocks
         let substantiveAXCount = axBlocks.filter { $0.text.count >= 18 }.count
-        if substantiveAXCount < 5 {
+        if substantiveAXCount < 4 {
             let sourceImage = window.focusedContentImage ?? cropActiveConversationImage(from: window.previewImage, for: window) ?? window.previewImage
             if let img = sourceImage {
                 let ocrBlocks = extractVisionOCRBlocks(from: img, windowBounds: window.bounds)
@@ -163,7 +221,9 @@ final class AppContentFeedExtractor {
             window: window,
             style: style
         )
+        cacheLock.lock()
         cachedDigests[window.id] = (now, digest)
+        cacheLock.unlock()
         return digest
     }
 
@@ -244,12 +304,19 @@ final class AppContentFeedExtractor {
             }
         }
 
-        guard let path = newestTranscriptPath,
-              let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        guard let path = newestTranscriptPath else { return nil }
+        cacheLock.lock()
+        if let existing = cachedAgyDigest, existing.path == path, existing.modDate == newestDate {
+            cacheLock.unlock()
+            return existing.digest
+        }
+        cacheLock.unlock()
+
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
 
         let fileSize = (try? handle.seekToEnd()) ?? 0
-        let readBytes: UInt64 = min(fileSize, 180_000)
+        let readBytes: UInt64 = min(fileSize, 120_000)
         if fileSize > readBytes {
             try? handle.seek(toOffset: fileSize - readBytes)
         } else {
@@ -345,12 +412,16 @@ final class AppContentFeedExtractor {
             )
         }
 
-        return WindowLiveDigest(
+        let builtDigest = WindowLiveDigest(
             style: .aiAgentThread,
             contextTitle: latestActionSummary,
             statusBadge: "🟢 LIVE AI SESSION",
             lines: tail
         )
+        cacheLock.lock()
+        cachedAgyDigest = (path, newestDate, builtDigest)
+        cacheLock.unlock()
+        return builtDigest
     }
 
     // MARK: - Layer 1b: Codex Live Session Reader (~/.codex/sessions)
@@ -362,6 +433,21 @@ final class AppContentFeedExtractor {
         let fm = FileManager.default
 
         let targetTitle = (window?.windowTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let cacheKey = targetTitle.isEmpty ? "__default__" : targetTitle.lowercased()
+        let now = Date().timeIntervalSinceReferenceDate
+
+        cacheLock.lock()
+        if let existing = cachedCodexDigestByTitle[cacheKey] {
+            if (now - existing.scannedAt) < 4.0,
+               let attrs = try? fm.attributesOfItem(atPath: existing.path),
+               let modDate = attrs[.modificationDate] as? Date,
+               modDate == existing.modDate {
+                cacheLock.unlock()
+                return existing.digest
+            }
+        }
+        cacheLock.unlock()
+
         var matchedSessionIDs: Set<String> = []
 
         if !targetTitle.isEmpty,
@@ -406,14 +492,28 @@ final class AppContentFeedExtractor {
             }
         }
 
-        guard let rolloutPath = newestMatchPath ?? newestAnyPath,
-              let handle = FileHandle(forReadingAtPath: rolloutPath) else {
+        guard let rolloutPath = newestMatchPath ?? newestAnyPath else {
+            return nil
+        }
+        let chosenModDate = (newestMatchPath != nil) ? newestMatchDate : newestAnyDate
+
+        cacheLock.lock()
+        if let existing = cachedCodexDigestByTitle[cacheKey],
+           existing.path == rolloutPath,
+           existing.modDate == chosenModDate {
+            cachedCodexDigestByTitle[cacheKey] = (existing.path, existing.modDate, now, existing.digest)
+            cacheLock.unlock()
+            return existing.digest
+        }
+        cacheLock.unlock()
+
+        guard let handle = FileHandle(forReadingAtPath: rolloutPath) else {
             return nil
         }
         defer { try? handle.close() }
 
         let fileSize = (try? handle.seekToEnd()) ?? 0
-        let readBytes: UInt64 = min(fileSize, 750_000)
+        let readBytes: UInt64 = min(fileSize, 160_000)
         if fileSize > readBytes {
             try? handle.seek(toOffset: fileSize - readBytes)
         } else {
@@ -504,12 +604,16 @@ final class AppContentFeedExtractor {
                 isHighlighted: false
             )
         }
-        return WindowLiveDigest(
+        let builtDigest = WindowLiveDigest(
             style: .aiAgentThread,
             contextTitle: latestSummary,
             statusBadge: "🟢 LIVE CODEX THREAD",
             lines: tail
         )
+        cacheLock.lock()
+        cachedCodexDigestByTitle[cacheKey] = (rolloutPath, chosenModDate, now, builtDigest)
+        cacheLock.unlock()
+        return builtDigest
     }
 
     private func cleanUserRequestString(_ raw: String) -> String {
@@ -559,10 +663,16 @@ final class AppContentFeedExtractor {
         guard AXIsProcessTrusted() else { return [] }
 
         let appRef = AXUIElementCreateApplication(window.ownerPID)
-        AXUIElementSetMessagingTimeout(appRef, 0.12)
+        AXUIElementSetMessagingTimeout(appRef, 0.08)
 
-        if !enabledManualAXPIDs.contains(window.ownerPID) {
+        cacheLock.lock()
+        let alreadyEnabled = enabledManualAXPIDs.contains(window.ownerPID)
+        if !alreadyEnabled {
             enabledManualAXPIDs.insert(window.ownerPID)
+        }
+        cacheLock.unlock()
+
+        if !alreadyEnabled {
             AXUIElementSetAttributeValue(appRef, "AXManualAccessibility" as CFString, kCFBooleanTrue)
             AXUIElementSetAttributeValue(appRef, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
         }

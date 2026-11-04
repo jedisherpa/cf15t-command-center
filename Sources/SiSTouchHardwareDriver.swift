@@ -74,6 +74,8 @@ final class SiSTouchHardwareDriver {
     private let sisStream = TouchStream(resolveScreen: { DisplayTargetManager.shared.cf15tScreen() })
     private var genericDevices: [Int: GenericDigitizerState] = [:]
     private var connectedDeviceKeys: Set<Int> = []
+    private var connectedLogicalIDs: Set<String> = []
+    private var hasReceivedMultiTouch0x91: Bool = false
 
     private init() {}
 
@@ -83,16 +85,14 @@ final class SiSTouchHardwareDriver {
         guard hidManager == nil else { return }
 
         let mgr = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-        let sisMatch: [String: Any] = [
-            kIOHIDVendorIDKey as String: Self.sisVendorID,
-            kIOHIDProductIDKey as String: Self.sisProductID
-        ]
-        // Any standard touchscreen (Digitizer page 0x0D, usage 0x04 = Touch Screen). Trackpads (0x05) are not matched.
+        // Match any standard touchscreen (Digitizer page 0x0D, usage 0x04 = Touch Screen), including SiS 0x0457:0x0819.
+        // Using a single matching dictionary avoids IOHIDManager creating duplicate IOHIDDevice instances for SiS,
+        // while still excluding trackpads (usage 0x05) and mice.
         let touchScreenMatch: [String: Any] = [
             kIOHIDPrimaryUsagePageKey as String: 0x0D,
             kIOHIDPrimaryUsageKey as String: 0x04
         ]
-        IOHIDManagerSetDeviceMatchingMultiple(mgr, [sisMatch, touchScreenMatch] as CFArray)
+        IOHIDManagerSetDeviceMatching(mgr, touchScreenMatch as CFDictionary)
 
         let context = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
 
@@ -109,7 +109,7 @@ final class SiSTouchHardwareDriver {
         }, context)
 
         IOHIDManagerScheduleWithRunLoop(mgr, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
-        let openResult = IOHIDManagerOpen(mgr, IOOptionBits(kIOHIDOptionsTypeNone))
+        let openResult = IOHIDManagerOpen(mgr, IOOptionBits(kIOHIDOptionsTypeSeizeDevice))
 
         if openResult == kIOReturnSuccess,
            let devs = IOHIDManagerCopyDevices(mgr) as? Set<IOHIDDevice> {
@@ -132,10 +132,19 @@ final class SiSTouchHardwareDriver {
         (IOHIDDeviceGetProperty(device, key as CFString) as? NSNumber)?.intValue ?? -1
     }
 
+    private func deviceLogicalID(_ device: IOHIDDevice) -> String {
+        let vid = intProperty(device, kIOHIDVendorIDKey)
+        let pid = intProperty(device, kIOHIDProductIDKey)
+        let loc = intProperty(device, kIOHIDLocationIDKey)
+        return "\(vid):\(pid):\(loc)"
+    }
+
     private func attachDevice(_ device: IOHIDDevice) {
         let key = deviceKey(device)
-        guard !connectedDeviceKeys.contains(key) else { return }
+        let logicalID = deviceLogicalID(device)
+        guard !connectedDeviceKeys.contains(key), !connectedLogicalIDs.contains(logicalID) else { return }
         connectedDeviceKeys.insert(key)
+        connectedLogicalIDs.insert(logicalID)
 
         // Seize the USB touchscreen so macOS WindowServer does NOT treat finger touches as mouse cursor movements.
         // This lets the user's physical mouse, trackpad, and trackball keep independent control of the cursor.
@@ -191,7 +200,9 @@ final class SiSTouchHardwareDriver {
 
     private func handleDeviceRemoved(_ device: IOHIDDevice) {
         let key = deviceKey(device)
+        let logicalID = deviceLogicalID(device)
         connectedDeviceKeys.remove(key)
+        connectedLogicalIDs.remove(logicalID)
         genericDevices.removeValue(forKey: key)
         if let buf = reportBuffers.removeValue(forKey: key) {
             buf.deallocate()
@@ -209,6 +220,7 @@ final class SiSTouchHardwareDriver {
         let bytes = UnsafeBufferPointer(start: ptr, count: length)
 
         if reportID == 0x91 && length >= 51 {
+            hasReceivedMultiTouch0x91 = true
             // Report 0x91 (145): 54-byte 5-finger packet
             var contacts: [SiSTouchContact] = []
             for i in 0..<5 {
@@ -228,8 +240,8 @@ final class SiSTouchHardwareDriver {
             }
             processDecodedContacts(contacts, stream: sisStream)
 
-        } else if reportID == 0x03 && length >= 6 {
-            // Report 0x03: 6-byte Single-Touch Mouse Emulation packet
+        } else if reportID == 0x03 && length >= 6 && !hasReceivedMultiTouch0x91 {
+            // Report 0x03: 6-byte Single-Touch Mouse Emulation fallback (only used if 0x91 isn't active)
             let buttonDown = (bytes[1] & 0x01) != 0
             let rawX = UInt16(bytes[2]) | (UInt16(bytes[3]) << 8)
             let rawY = UInt16(bytes[4]) | (UInt16(bytes[5]) << 8)
@@ -428,33 +440,52 @@ final class SiSTouchHardwareDriver {
             if let window = self.targetCommandCenterWindow ?? NSApp.windows.first(where: { $0.isVisible }),
                window.isVisible,
                window.frame.contains(screenPoint) {
+                // Instrument-panel button actuation: fire immediately on touch-down (.began) at the exact contact point
+                // so finger roll or lift never delays or cancels a SwiftUI button press.
+                guard phase == .began else { return }
+
+                if !window.isKeyWindow {
+                    window.makeKey()
+                }
+
                 let windowPoint = NSPoint(
                     x: screenPoint.x - window.frame.minX,
                     y: screenPoint.y - window.frame.minY
                 )
-                let eventType: NSEvent.EventType
-                switch phase {
-                case .began:
-                    stream.currentEventNumber += 1
-                    eventType = .leftMouseDown
-                case .moved:
-                    eventType = .leftMouseDragged
-                case .ended:
-                    eventType = .leftMouseUp
-                }
+                stream.currentEventNumber += 1
+                let evNum = stream.currentEventNumber
+                let winNum = window.windowNumber
+                let now = ProcessInfo.processInfo.systemUptime
 
-                if let syntheticEvent = NSEvent.mouseEvent(
-                    with: eventType,
+                if let downEvent = NSEvent.mouseEvent(
+                    with: .leftMouseDown,
                     location: windowPoint,
                     modifierFlags: [],
-                    timestamp: ProcessInfo.processInfo.systemUptime,
-                    windowNumber: window.windowNumber,
+                    timestamp: now,
+                    windowNumber: winNum,
                     context: nil,
-                    eventNumber: stream.currentEventNumber,
+                    eventNumber: evNum,
                     clickCount: 1,
-                    pressure: phase == .ended ? 0.0 : 1.0
+                    pressure: 1.0
                 ) {
-                    window.sendEvent(syntheticEvent)
+                    window.sendEvent(downEvent)
+                }
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.018) { [weak window] in
+                    guard let window = window else { return }
+                    if let upEvent = NSEvent.mouseEvent(
+                        with: .leftMouseUp,
+                        location: windowPoint,
+                        modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: winNum,
+                        context: nil,
+                        eventNumber: evNum,
+                        clickCount: 1,
+                        pressure: 0.0
+                    ) {
+                        window.sendEvent(upEvent)
+                    }
                 }
                 return
             }

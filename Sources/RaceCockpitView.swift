@@ -85,7 +85,7 @@ struct RaceMetrics {
         let refHeight: CGFloat = isBar ? 700 : 1040
         let raw: CGFloat = min(size.width / 1920, size.height / refHeight)
         k = max(0.5, min(1.3, raw))
-        textScale = CGFloat(max(0.8, min(1.3, fontScale / 1.48)))
+        textScale = CGFloat(max(0.72, min(1.55, fontScale / 1.48)))
     }
 
     func s(_ v: CGFloat) -> CGFloat { v * k }
@@ -133,6 +133,16 @@ enum RaceAppStatus: Equatable {
     }
 }
 
+/// Instant instrument-panel button style: depresses and flashes on touch-down (< 16ms).
+struct RacePressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
+            .brightness(configuration.isPressed ? 0.18 : 0.0)
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+    }
+}
+
 struct RaceAppInfo {
     let window: MonitoredWindow
     let digest: WindowLiveDigest
@@ -143,7 +153,7 @@ struct RaceAppInfo {
 
     @MainActor
     static func make(_ window: MonitoredWindow, viewModel: CommandCenterViewModel) -> RaceAppInfo {
-        let digest: WindowLiveDigest = window.liveDigest ?? AppContentFeedExtractor.shared.extractLiveDigest(for: window)
+        let digest: WindowLiveDigest = AppContentFeedExtractor.shared.cachedOrFallbackDigest(for: window)
         let cpu: Double = viewModel.cpuPercent(for: window)
         let question: String? = pendingQuestion(in: digest)
 
@@ -391,7 +401,7 @@ struct RaceTopBar: View {
                     .overlay(Capsule().stroke(RacePalette.edge, lineWidth: m.s(2)))
                     .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RacePressButtonStyle())
 
             RaceModeKnob(viewModel: viewModel, m: m)
 
@@ -408,16 +418,20 @@ struct RaceTopBar: View {
                         .overlay(Capsule().stroke(RacePalette.edge, lineWidth: m.s(2)))
                         .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RacePressButtonStyle())
             }
 
             RaceRoundTextButton(label: "A−", d: m.s(76), fg: .white, ring: RacePalette.edge, m: m) {
-                viewModel.feedFontScale = max(1.18, viewModel.feedFontScale - 0.12)
+                viewModel.feedFontScale = max(1.00, viewModel.feedFontScale - 0.18)
                 viewModel.saveDashboardPreferencesAsDefaults()
+                let pct = Int((viewModel.feedFontScale / 1.48 * 100.0).rounded())
+                viewModel.statusBannerMessage = "Text size: \(pct)% (Smaller)"
             }
             RaceRoundTextButton(label: "A+", d: m.s(76), fg: RacePalette.yellow, ring: RacePalette.yellow, m: m) {
-                viewModel.feedFontScale = min(1.92, viewModel.feedFontScale + 0.12)
+                viewModel.feedFontScale = min(2.20, viewModel.feedFontScale + 0.18)
                 viewModel.saveDashboardPreferencesAsDefaults()
+                let pct = Int((viewModel.feedFontScale / 1.48 * 100.0).rounded())
+                viewModel.statusBannerMessage = "Text size: \(pct)% (Larger)"
             }
 
             Button(action: { viewModel.isShowingSettingsSheet = true }) {
@@ -425,7 +439,7 @@ struct RaceTopBar: View {
                     .background(Capsule().fill(RacePalette.yellow))
                     .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RacePressButtonStyle())
         }
         .frame(height: m.topBarHeight)
     }
@@ -476,7 +490,7 @@ struct RaceRoundTextButton: View {
                 .overlay(Circle().stroke(ring, lineWidth: m.s(3)))
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RacePressButtonStyle())
     }
 }
 
@@ -493,18 +507,18 @@ struct RaceModeKnob: View {
             Button(action: { viewModel.setOperatingMode(.orchestrate) }) {
                 knobLabel(title: "ORCHESTRATE", subtitle: "Switch apps on laptop", on: !isFull, alignment: .trailing)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RacePressButtonStyle())
 
             Button(action: { viewModel.setOperatingMode(isFull ? .orchestrate : .fullControl) }) {
                 RaceKnobDial(angle: isFull ? 45 : -45, d: m.isBar ? m.s(62) : m.s(76))
                     .contentShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RacePressButtonStyle())
 
             Button(action: { viewModel.setOperatingMode(.fullControl) }) {
                 knobLabel(title: "FULL CONTROL", subtitle: "Lid closed · run from here", on: isFull, alignment: .leading)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RacePressButtonStyle())
         }
         .padding(.horizontal, m.s(24))
         .frame(height: m.isBar ? m.s(76) : m.s(90))
@@ -693,34 +707,38 @@ struct RaceFocusHeader: View {
 
             Spacer(minLength: m.s(10))
 
-            RaceStatusLCD(info: info, m: m)
+            RaceStatusLCD(viewModel: viewModel, info: info, m: m)
         }
     }
 }
 
 struct RaceStatusLCD: View {
+    @ObservedObject var viewModel: CommandCenterViewModel
     let info: RaceAppInfo
     let m: RaceMetrics
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: m.s(16))
+        let banner = viewModel.statusBannerMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let showBanner = !banner.isEmpty && !banner.hasPrefix("Ready —")
 
         VStack(alignment: .leading, spacing: m.s(2)) {
-            Text("STATUS")
-                .font(RaceType.mono(m.s(17), .bold))
-                .foregroundColor(Color(red: 0.60, green: 0.54, blue: 0.23))
-                .tracking(m.s(3))
+            Text(showBanner ? "LAST ACTION · TELEMETRY" : "STATUS")
+                .font(RaceType.mono(m.s(16), .bold))
+                .foregroundColor(showBanner ? RacePalette.yellow : Color(red: 0.60, green: 0.54, blue: 0.23))
+                .tracking(m.s(2.5))
             Text(info.status.label)
                 .font(RaceType.mono(m.isBar ? m.s(28) : m.s(34), .heavy))
                 .foregroundColor(info.status.color)
-            Text(info.statusLine)
-                .font(RaceType.font(m.s(22), .semibold, italic: false))
+            Text(showBanner ? banner : info.statusLine)
+                .font(RaceType.font(m.t(21), .semibold, italic: false))
                 .foregroundColor(.white)
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
         .padding(.horizontal, m.s(22))
         .padding(.vertical, m.s(10))
-        .frame(maxWidth: m.s(560), alignment: .leading)
+        .frame(maxWidth: m.s(580), alignment: .leading)
         .background(shape.fill(RacePalette.lcdBg))
         .overlay(shape.stroke(Color(red: 0.17, green: 0.23, blue: 0.17), lineWidth: m.s(3)))
         .shadow(color: RacePalette.yellow.opacity(0.10), radius: m.s(10))
@@ -811,7 +829,7 @@ struct RaceLiveScreen: View {
                 )
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RacePressButtonStyle())
 
             if !m.isBar {
                 Text("👆 Tap the screen to switch: close-up · chat response · whole window")
@@ -838,13 +856,13 @@ struct RaceLiveChatResponsePane: View {
             if let prompt = latestPrompt, prompt.id != latestResponse?.id {
                 VStack(alignment: .leading, spacing: m.s(3)) {
                     Text("🗣️ YOU ASKED")
-                        .font(RaceType.font(m.s(17), .heavy))
+                        .font(RaceType.font(m.t(17), .heavy))
                         .foregroundColor(Color(red: 0.56, green: 0.78, blue: 1.0))
                     Text(RaceAppInfo.clip(prompt.text, 180))
-                        .font(RaceType.font(m.s(21), .semibold, italic: false))
+                        .font(RaceType.font(m.t(21), .semibold, italic: false))
                         .foregroundColor(Color(white: 0.92))
                         .lineLimit(m.isBar ? 2 : 3)
-                        .minimumScaleFactor(0.75)
+                        .minimumScaleFactor(0.70)
                 }
                 .padding(.horizontal, m.s(14))
                 .padding(.vertical, m.s(10))
@@ -856,13 +874,13 @@ struct RaceLiveChatResponsePane: View {
             if let resp = latestResponse {
                 VStack(alignment: .leading, spacing: m.s(6)) {
                     Text("💬 \(info.window.appName.uppercased()) RESPONSE")
-                        .font(RaceType.font(m.s(19), .heavy))
+                        .font(RaceType.font(m.t(19), .heavy))
                         .foregroundColor(RacePalette.yellow)
                     Text(RaceAppInfo.clip(resp.text, 520))
-                        .font(RaceType.font(m.isBar ? m.s(22) : m.s(25), .bold, italic: false))
+                        .font(RaceType.font(m.isBar ? m.t(22) : m.t(25), .bold, italic: false))
                         .foregroundColor(.white)
                         .lineLimit(m.isBar ? 6 : 11)
-                        .minimumScaleFactor(0.68)
+                        .minimumScaleFactor(0.65)
                         .fixedSize(horizontal: false, vertical: false)
                 }
                 .padding(.horizontal, m.s(16))
@@ -1003,13 +1021,13 @@ struct RaceRadioQuestion: View {
                 RaceOrb(glyph: "✅", inside: "YES", diameter: orb, fill: RacePalette.darkGreen, fg: Color(red: 0.01, green: 0.17, blue: 0.07))
                     .contentShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RacePressButtonStyle())
 
             Button(action: { viewModel.executeAACSymbolCard(noCard, for: info.window) }) {
                 RaceOrb(glyph: "❌", inside: "NO", diameter: orb, fill: RacePalette.red, fg: Color(red: 0.17, green: 0.02, blue: 0.02))
                     .contentShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RacePressButtonStyle())
         }
         .padding(.horizontal, m.s(20))
         .padding(.vertical, m.s(14))
@@ -1145,7 +1163,7 @@ struct RaceSteeringWheel: View {
                     )
                     .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RacePressButtonStyle())
             }
 
             // Hub: READ IT + picture buttons for this app
@@ -1158,6 +1176,9 @@ struct RaceSteeringWheel: View {
                     m: m
                 ) {
                     speechEngine.toggleReadAloud(for: win)
+                    viewModel.statusBannerMessage = speechEngine.isSpeaking
+                        ? "🔊 Reading \(win.appName) aloud"
+                        : "⏹️ Stopped reading \(win.appName)"
                 }
                 ForEach(hubCards) { card in
                     Spacer(minLength: 0)
@@ -1190,7 +1211,7 @@ struct RaceSteeringWheel: View {
                         }
                         .contentShape(Circle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RacePressButtonStyle())
                 }
             }
         }
@@ -1246,7 +1267,7 @@ struct RaceHubButton: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RacePressButtonStyle())
     }
 }
 
@@ -1257,6 +1278,8 @@ struct RaceTimingTower: View {
     let others: [MonitoredWindow]
     let m: RaceMetrics
 
+    @State private var pageIndex: Int = 0
+
     var body: some View {
         let header = UnevenRoundedRectangle(
             topLeadingRadius: m.s(14),
@@ -1264,17 +1287,38 @@ struct RaceTimingTower: View {
             bottomTrailingRadius: m.s(4),
             topTrailingRadius: m.s(14)
         )
+        let pageSize: Int = max(1, m.towerMaxRows)
+        let totalPages: Int = max(1, Int(ceil(Double(others.count) / Double(pageSize))))
+        let clampedPage: Int = min(max(0, pageIndex), totalPages - 1)
+        let startIdx: Int = clampedPage * pageSize
+        let endIdx: Int = min(others.count, startIdx + pageSize)
+        let visibleSlice: [MonitoredWindow] = (startIdx < endIdx) ? Array(others[startIdx..<endIdx]) : []
 
         VStack(spacing: m.s(8)) {
             HStack {
                 Text("OTHER APPS")
                     .font(RaceType.font(m.s(26), .black))
                 Spacer(minLength: m.s(8))
-                Text("tap one to put it on the big screen")
-                    .font(RaceType.font(m.s(17), .semibold, italic: false))
-                    .opacity(0.9)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                if totalPages > 1 {
+                    Button(action: {
+                        pageIndex = (clampedPage + 1) % totalPages
+                    }) {
+                        Text("MORE (\(clampedPage + 1)/\(totalPages)) ▶")
+                            .font(RaceType.font(m.s(19), .black, italic: false))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, m.s(12))
+                            .padding(.vertical, m.s(4))
+                            .background(Capsule().fill(RacePalette.yellow))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(RacePressButtonStyle())
+                } else {
+                    Text("tap one to put it on the big screen")
+                        .font(RaceType.font(m.s(17), .semibold, italic: false))
+                        .opacity(0.9)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
             }
             .foregroundColor(.white)
             .padding(.horizontal, m.s(18))
@@ -1296,26 +1340,17 @@ struct RaceTimingTower: View {
                             .background(Capsule().fill(RacePalette.yellow))
                             .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RacePressButtonStyle())
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(RoundedRectangle(cornerRadius: m.s(8)).fill(RacePalette.rowBg))
-            } else if others.count <= m.towerMaxRows {
-                ForEach(Array(others.enumerated()), id: \.element.id) { idx, win in
-                    RaceTowerRow(viewModel: viewModel, window: win, position: idx + 2, m: m)
+            } else {
+                ForEach(Array(visibleSlice.enumerated()), id: \.element.id) { offset, win in
+                    RaceTowerRow(viewModel: viewModel, window: win, position: startIdx + offset + 2, m: m)
                         .frame(maxHeight: m.s(210))
                 }
                 Spacer(minLength: 0)
-            } else {
-                ScrollView(.vertical, showsIndicators: true) {
-                    VStack(spacing: m.s(8)) {
-                        ForEach(Array(others.enumerated()), id: \.element.id) { idx, win in
-                            RaceTowerRow(viewModel: viewModel, window: win, position: idx + 2, m: m)
-                                .frame(height: m.towerRowHeight)
-                        }
-                    }
-                }
             }
         }
     }
@@ -1354,7 +1389,7 @@ struct RaceTowerRow: View {
 
                     VStack(alignment: .leading, spacing: m.s(4)) {
                         Text(window.appName)
-                            .font(RaceType.font(m.isBar ? m.s(28) : m.s(34), .heavy))
+                            .font(RaceType.font(m.isBar ? m.t(28) : m.t(34), .heavy))
                             .foregroundColor(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
@@ -1362,7 +1397,7 @@ struct RaceTowerRow: View {
                             RaceStatusPill(status: info.status, fontSize: m.s(18))
                             if !m.isBar {
                                 Text(info.statusLine)
-                                    .font(RaceType.font(m.s(21), .semibold, italic: false))
+                                    .font(RaceType.font(m.t(21), .semibold, italic: false))
                                     .foregroundColor(Color(white: 0.72))
                                     .lineLimit(1)
                             }
@@ -1373,7 +1408,7 @@ struct RaceTowerRow: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RacePressButtonStyle())
 
             Button(action: { viewModel.toggleVoiceDictation(for: window) }) {
                 Text(isRec ? "📤" : "🎤")
@@ -1383,7 +1418,7 @@ struct RaceTowerRow: View {
                     .overlay(Circle().stroke(isRec ? RacePalette.red : RacePalette.green, lineWidth: m.s(3)))
                     .contentShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RacePressButtonStyle())
         }
         .padding(.trailing, m.s(14))
         .background(shape.fill(RacePalette.rowBg))

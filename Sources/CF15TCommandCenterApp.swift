@@ -123,7 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.minSize = NSSize(width: 640, height: 360)
         window.setFrame(initialFrame, display: true)
         window.collectionBehavior = [.managed, .fullScreenPrimary, .canJoinAllSpaces]
-        window.orderFrontRegardless()
+        window.makeKeyAndOrderFront(nil)
 
         self.mainWindow = window
         SiSTouchHardwareDriver.shared.targetCommandCenterWindow = window

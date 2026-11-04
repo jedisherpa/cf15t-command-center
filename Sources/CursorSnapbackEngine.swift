@@ -100,7 +100,7 @@ final class CursorSnapbackEngine {
             window.minSize = NSSize(width: 640, height: 88)
             window.level = .floating
             window.setFrame(dockRect, display: true, animate: true)
-            window.orderFrontRegardless()
+            window.makeKeyAndOrderFront(nil)
             return "Docked Touch Control Bar at top of \(targetScreen.localizedName) — Live App active below"
         } else {
             window.minSize = NSSize(width: 640, height: 360)
@@ -108,7 +108,7 @@ final class CursorSnapbackEngine {
             // so macOS NEVER dumps open laptop windows on top of the Command Center!
             window.level = alwaysOnTop ? .floating : .normal
             window.setFrame(vis, display: true, animate: true)
-            window.orderFrontRegardless()
+            window.makeKeyAndOrderFront(nil)
             return "Command Center active on \(targetScreen.localizedName) (\(alwaysOnTop ? "Always-On-Top Full Control Shield" : "Orchestrate Mode"))"
         }
     }

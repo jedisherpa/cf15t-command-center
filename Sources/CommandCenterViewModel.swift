@@ -104,6 +104,8 @@ final class CommandCenterViewModel: ObservableObject {
     private var lastExternalFrontmostPID: pid_t?
     private var lastFrontmostOnScreenWindowID: CGWindowID?
     private var userPinnedWindowUntil: TimeInterval = 0
+    private var isBackgroundRefreshInFlight: Bool = false
+    private let backgroundScanQueue = DispatchQueue(label: "com.paulcooper.cf15t.scanner", qos: .userInitiated)
     private let defaultsKeySlotA = "cf15t.voice.slotA"
     private let defaultsKeySlotB = "cf15t.voice.slotB"
     private let defaultsKeySelectionMode = "cf15t.programs.mode"
@@ -176,16 +178,15 @@ final class CommandCenterViewModel: ObservableObject {
     private func handleExternalAppActivated(pid: pid_t) {
         lastExternalFrontmostPID = pid
         userPinnedWindowUntil = 0
-        let fetched = WindowTilingEngine.shared.fetchOpenWindows(capturePreviews: captureLivePreviews)
-        self.openWindows = fetched
-        if let match = fetched.first(where: { $0.ownerPID == pid && $0.id != 999_999 }) {
-            ensureWindowIsDisplayed(match)
-            lastFrontmostOnScreenWindowID = match.id
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
-                stageWindowID = match.id
+        if let existingMatch = openWindows.first(where: { $0.ownerPID == pid && $0.id != 999_999 }) {
+            ensureWindowIsDisplayed(existingMatch)
+            lastFrontmostOnScreenWindowID = existingMatch.id
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
+                stageWindowID = existingMatch.id
             }
-            statusBannerMessage = "Active on laptop: \(match.appName)"
+            statusBannerMessage = "Active on laptop: \(existingMatch.appName)"
         }
+        refreshAll(captureImages: captureLivePreviews, force: true)
     }
 
     private func ensureWindowIsDisplayed(_ window: MonitoredWindow) {
@@ -379,7 +380,10 @@ final class CommandCenterViewModel: ObservableObject {
 
     // MARK: - Refresh Logic
 
-    func refreshAll(captureImages: Bool = true) {
+    func refreshAll(captureImages: Bool = true, force: Bool = false) {
+        guard !isBackgroundRefreshInFlight || force else { return }
+        isBackgroundRefreshInFlight = true
+
         connectedScreenCount = NSScreen.screens.count
         isAccessibilityGranted = WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: false)
 
@@ -387,9 +391,6 @@ final class CommandCenterViewModel: ObservableObject {
         let nowLidClosed = KeepAwakeWorker.shared.isLaptopLidClosed()
         isLaptopLidClosed = nowLidClosed
         isClamshellBatterySleepDisabled = KeepAwakeWorker.shared.isClamshellSleepDisabled()
-
-        let fetchedWindows = WindowTilingEngine.shared.fetchOpenWindows(capturePreviews: captureImages)
-        self.openWindows = fetchedWindows
 
         // If the user just closed the MacBook lid, automatically switch to FULL CONTROL and shield Command Center on top!
         if !wasLidClosed && nowLidClosed {
@@ -404,55 +405,70 @@ final class CommandCenterViewModel: ObservableObject {
             statusBannerMessage = "Laptop Lid Closed — Command Center Locked ON TOP in Full Control Mode"
         }
 
-        // Follow whichever app/window is currently frontmost on the laptop whenever it changes
+        let priorityID = stageWindowID
         let selfPID = ProcessInfo.processInfo.processIdentifier
         let frontApp = NSWorkspace.shared.frontmostApplication
         let externalFrontPID: pid_t? = (frontApp?.processIdentifier != selfPID) ? frontApp?.processIdentifier : nil
-        let topmostLaptopWindow: MonitoredWindow? = {
-            if let extPID = externalFrontPID,
-               let match = fetchedWindows.first(where: { $0.ownerPID == extPID && $0.id != 999_999 }) {
-                return match
-            }
-            return fetchedWindows.first(where: { $0.id != 999_999 })
-        }()
 
-        let now = Date().timeIntervalSinceReferenceDate
-        if now >= userPinnedWindowUntil, let activeWin = topmostLaptopWindow {
-            let frontWindowChanged = (activeWin.id != lastFrontmostOnScreenWindowID)
-            let frontAppChanged = (externalFrontPID != nil && externalFrontPID != lastExternalFrontmostPID)
-            if frontWindowChanged || frontAppChanged {
-                lastFrontmostOnScreenWindowID = activeWin.id
-                if let extPID = externalFrontPID {
-                    lastExternalFrontmostPID = extPID
+        backgroundScanQueue.async { [weak self] in
+            let fetchedWindows = WindowTilingEngine.shared.fetchOpenWindows(
+                capturePreviews: captureImages,
+                priorityStageWindowID: priorityID
+            )
+            let scanResult = AgentAndTaskMonitor.shared.scanPlatformsAndTasks(openWindows: fetchedWindows)
+
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                self.isBackgroundRefreshInFlight = false
+                self.openWindows = fetchedWindows
+                self.agentSnapshots = scanResult.agents
+                self.runningTasks = scanResult.tasks
+
+                // Follow whichever app/window is currently frontmost on the laptop whenever it genuinely changes
+                let effectiveFrontPID: pid_t? = externalFrontPID ?? self.lastExternalFrontmostPID
+                let topmostLaptopWindow: MonitoredWindow? = {
+                    if let extPID = effectiveFrontPID,
+                       let match = fetchedWindows.first(where: { $0.ownerPID == extPID && $0.id != 999_999 }) {
+                        return match
+                    }
+                    return fetchedWindows.first(where: { $0.id != 999_999 && $0.appName.lowercased() != "system settings" })
+                        ?? fetchedWindows.first(where: { $0.id != 999_999 })
+                }()
+
+                let now = Date().timeIntervalSinceReferenceDate
+                if let extPID = externalFrontPID,
+                   let activeWin = fetchedWindows.first(where: { $0.ownerPID == extPID && $0.id != 999_999 }) {
+                    let frontWindowChanged = (activeWin.id != self.lastFrontmostOnScreenWindowID)
+                    let frontAppChanged = (extPID != self.lastExternalFrontmostPID)
+                    self.lastFrontmostOnScreenWindowID = activeWin.id
+                    self.lastExternalFrontmostPID = extPID
+                    if now >= self.userPinnedWindowUntil && (frontWindowChanged || frontAppChanged) {
+                        self.ensureWindowIsDisplayed(activeWin)
+                        self.stageWindowID = activeWin.id
+                    }
                 }
-                ensureWindowIsDisplayed(activeWin)
-                stageWindowID = activeWin.id
+
+                let currentPool = self.allDisplayedWindows
+                if let currentID = self.stageWindowID, currentPool.contains(where: { $0.id == currentID }) {
+                    // Keep active stage selection
+                } else if let activeWin = topmostLaptopWindow {
+                    self.ensureWindowIsDisplayed(activeWin)
+                    self.stageWindowID = activeWin.id
+                } else if !self.defaultStageAppName.isEmpty,
+                          let preferred = currentPool.first(where: { self.normalizedAppKey($0.appName) == self.normalizedAppKey(self.defaultStageAppName) }) {
+                    self.stageWindowID = preferred.id
+                } else {
+                    let activeSlot = (self.activeVoiceSlotID == "slotA") ? self.slotA : self.slotB
+                    if let voiceWin = currentPool.first(where: { self.matchesVoiceSlot($0, slot: activeSlot) }) {
+                        self.stageWindowID = voiceWin.id
+                    } else if let aiWin = currentPool.first(where: { $0.platform != nil }) {
+                        self.stageWindowID = aiWin.id
+                    } else {
+                        self.stageWindowID = currentPool.first?.id
+                    }
+                }
             }
         }
-
-        let currentPool = allDisplayedWindows
-        if let currentID = stageWindowID, currentPool.contains(where: { $0.id == currentID }) {
-            // Keep active stage selection
-        } else if let activeWin = topmostLaptopWindow {
-            ensureWindowIsDisplayed(activeWin)
-            stageWindowID = activeWin.id
-        } else if !defaultStageAppName.isEmpty,
-                  let preferred = currentPool.first(where: { normalizedAppKey($0.appName) == normalizedAppKey(defaultStageAppName) }) {
-            stageWindowID = preferred.id
-        } else {
-            let activeSlot = (activeVoiceSlotID == "slotA") ? slotA : slotB
-            if let voiceWin = currentPool.first(where: { matchesVoiceSlot($0, slot: activeSlot) }) {
-                stageWindowID = voiceWin.id
-            } else if let aiWin = currentPool.first(where: { $0.platform != nil }) {
-                stageWindowID = aiWin.id
-            } else {
-                stageWindowID = currentPool.first?.id
-            }
-        }
-
-        let scanResult = AgentAndTaskMonitor.shared.scanPlatformsAndTasks(openWindows: fetchedWindows)
-        self.agentSnapshots = scanResult.agents
-        self.runningTasks = scanResult.tasks
     }
 
     // MARK: - Dual Operating Modes: ORCHESTRATE vs. FULL CONTROL (Travel / Clamshell)
@@ -703,12 +719,27 @@ final class CommandCenterViewModel: ObservableObject {
 
     func promoteWindowToStage(_ window: MonitoredWindow) {
         ensureWindowIsDisplayed(window)
-        userPinnedWindowUntil = Date().timeIntervalSinceReferenceDate + 5.0
-        lastFrontmostOnScreenWindowID = window.id
-        lastExternalFrontmostPID = window.ownerPID
+        userPinnedWindowUntil = Date().timeIntervalSinceReferenceDate + 15.0
 
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.85)) {
             stageWindowID = window.id
+        }
+
+        // Refresh the newly promoted stage window's image & digest in the background immediately
+        backgroundScanQueue.async { [weak self] in
+            let snap = WindowTilingEngine.shared.captureWindowSnapshot(windowID: window.id)
+            let cropped = AppContentFeedExtractor.shared.cropActiveConversationImage(from: snap, for: window)
+            var tempWin = window
+            tempWin.previewImage = snap ?? window.previewImage
+            tempWin.focusedContentImage = cropped ?? window.focusedContentImage
+            let digest = AppContentFeedExtractor.shared.extractLiveDigest(for: tempWin, forceRefresh: true)
+            Task { @MainActor [weak self] in
+                guard let self = self,
+                      let idx = self.openWindows.firstIndex(where: { $0.id == window.id }) else { return }
+                if let snap = snap { self.openWindows[idx].previewImage = snap }
+                if let cropped = cropped { self.openWindows[idx].focusedContentImage = cropped }
+                self.openWindows[idx].liveDigest = digest
+            }
         }
 
         if operatingMode == .fullControl {
@@ -719,10 +750,7 @@ final class CommandCenterViewModel: ObservableObject {
                 dockHeight: currentDockReserveHeight,
                 alwaysOnTop: true
             )
-            statusBannerMessage = "FULL CONTROL: \(window.appName) is now #1 Center Stage — Tap 🎙️ TALK to speak your next instruction"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                self?.refreshAll(captureImages: true)
-            }
+            statusBannerMessage = "FULL CONTROL: \(window.appName) is now #1 Center Stage"
             return
         }
 
@@ -734,15 +762,12 @@ final class CommandCenterViewModel: ObservableObject {
                 topDockReserveHeight: 0,
                 fillDisplay: autoTileRealWindowsOnTap
             )
-            statusBannerMessage = "ORCHESTRATE: Switched Main Screen to \(window.appName)"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                self?.refreshAll(captureImages: true)
-            }
+            statusBannerMessage = "Switched Laptop Screen to \(window.appName)"
         } else if autoTileRealWindowsOnTap && WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: false) {
             applyRealScreenTilingNow(stageWindow: window, promptIfUntrusted: false)
         } else {
             WindowTilingEngine.shared.focusWindow(window)
-            statusBannerMessage = "Switched to \(window.appName) (\(Int(window.bounds.width))×\(Int(window.bounds.height)))"
+            statusBannerMessage = "Switched to \(window.appName)"
         }
     }
 
@@ -781,10 +806,16 @@ final class CommandCenterViewModel: ObservableObject {
 
     func executeAACSymbolCard(_ card: AACVisualSymbolCard, for window: MonitoredWindow) {
         stageWindowID = window.id
+        userPinnedWindowUntil = Date().timeIntervalSinceReferenceDate + 15.0
         speechEngine.speakAACConfirmation(card.spokenConfirmation)
 
         switch card.action {
         case .sendPrompt(let prompt, let pressReturn):
+            // Immediately reflect the sent command in the on-screen live digest (< 1ms visual feedback)
+            let updatedDigest = AppContentFeedExtractor.shared.appendInstantUserPrompt(prompt, to: window)
+            if let idx = openWindows.firstIndex(where: { $0.id == window.id }) {
+                openWindows[idx].liveDigest = updatedDigest
+            }
             dictationEngine.deliverInstructionToWindow(prompt, window: window, pressReturn: pressReturn)
             statusBannerMessage = "\(card.emoji) Sent to \(window.appName): \"\(prompt)\""
 
@@ -797,10 +828,11 @@ final class CommandCenterViewModel: ObservableObject {
                 flags: flags,
                 targetWindow: window
             )
-            statusBannerMessage = "\(card.emoji) \(label) in \(window.appName)"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                self?.refreshAll(captureImages: true)
-            }
+            statusBannerMessage = "\(card.emoji) \(label) sent to \(window.appName)"
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
+            self?.refreshAll(captureImages: true, force: true)
         }
     }
 

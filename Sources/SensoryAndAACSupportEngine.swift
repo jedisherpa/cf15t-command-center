@@ -259,7 +259,7 @@ struct AACVisualSymbolCard: Identifiable {
                 AACVisualSymbolCard(
                     id: "nav_back",
                     iconName: "arrow.backward.circle.fill",
-                    emoji: "🔙",
+                    emoji: "⬅️",
                     shortTitle: "GO BACK",
                     spokenConfirmation: "Go back",
                     backgroundColor: Color(red: 1.0, green: 0.72, blue: 0.18),

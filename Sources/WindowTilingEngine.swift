@@ -37,7 +37,11 @@ final class WindowTilingEngine {
 
     // MARK: - Enumerate Open Windows
 
-    func fetchOpenWindows(capturePreviews: Bool = true, excludedPID: pid_t = ProcessInfo.processInfo.processIdentifier) -> [MonitoredWindow] {
+    func fetchOpenWindows(
+        capturePreviews: Bool = true,
+        excludedPID: pid_t = ProcessInfo.processInfo.processIdentifier,
+        priorityStageWindowID: CGWindowID? = nil
+    ) -> [MonitoredWindow] {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             return []
@@ -96,14 +100,16 @@ final class WindowTilingEngine {
             let idx = perAppWindowCounter[ownerPID, default: 0]
             perAppWindowCounter[ownerPID] = idx + 1
 
+            let winID = CGWindowID(windowNumber)
+            let isPriorityWindow = (winID == priorityStageWindowID) || (result.count < 5)
             let detectedPlatform = detectPlatform(appName: resolvedAppName, bundleID: bundleID, windowTitle: title)
             var preview: NSImage? = nil
-            if capturePreviews {
-                preview = captureWindowSnapshot(windowID: CGWindowID(windowNumber))
+            if capturePreviews && isPriorityWindow {
+                preview = captureWindowSnapshot(windowID: winID)
             }
 
             var win = MonitoredWindow(
-                id: CGWindowID(windowNumber),
+                id: winID,
                 ownerPID: ownerPID,
                 appName: resolvedAppName,
                 bundleIdentifier: bundleID,
@@ -114,8 +120,12 @@ final class WindowTilingEngine {
                 appIcon: appIcon,
                 previewImage: preview
             )
-            win.focusedContentImage = AppContentFeedExtractor.shared.cropActiveConversationImage(from: preview, for: win)
-            win.liveDigest = AppContentFeedExtractor.shared.extractLiveDigest(for: win)
+            if isPriorityWindow {
+                win.focusedContentImage = AppContentFeedExtractor.shared.cropActiveConversationImage(from: preview, for: win)
+                win.liveDigest = AppContentFeedExtractor.shared.extractLiveDigest(for: win)
+            } else {
+                win.liveDigest = AppContentFeedExtractor.shared.cachedOrFallbackDigest(for: win)
+            }
             result.append(win)
         }
 
@@ -170,7 +180,21 @@ final class WindowTilingEngine {
     // MARK: - Focus / Raise Single Window
 
     func focusWindow(_ window: MonitoredWindow) {
+        guard window.id != 999_999 else { return }
+        let axApp = AXUIElementCreateApplication(window.ownerPID)
+        AXUIElementSetAttributeValue(axApp, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+
+        if let axWin = findAXWindow(for: window) {
+            AXUIElementSetAttributeValue(axWin, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+            AXUIElementPerformAction(axWin, kAXRaiseAction as CFString)
+            AXUIElementSetAttributeValue(axWin, kAXMainAttribute as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(axWin, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        }
+
         if let app = NSRunningApplication(processIdentifier: window.ownerPID) {
+            // Because TouchInstrumentPanel is a non-activating panel, briefly claim activation
+            // before yielding it to the target app so macOS 15 WindowServer honors the handoff.
+            NSApp.activate(ignoringOtherApps: true)
             NSApp.yieldActivation(to: app)
             app.unhide()
             app.activate(options: [.activateAllWindows])
@@ -179,11 +203,6 @@ final class WindowTilingEngine {
                 config.activates = true
                 NSWorkspace.shared.openApplication(at: bundleURL, configuration: config, completionHandler: nil)
             }
-        }
-        if let axWin = findAXWindow(for: window) {
-            AXUIElementSetAttributeValue(axWin, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-            AXUIElementPerformAction(axWin, kAXRaiseAction as CFString)
-            AXUIElementSetAttributeValue(axWin, kAXMainAttribute as CFString, kCFBooleanTrue)
         }
     }
 
