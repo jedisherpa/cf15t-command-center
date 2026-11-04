@@ -59,7 +59,7 @@ final class CommandCenterViewModel: ObservableObject {
     }
     @Published var programSelectionMode: ProgramSelectionMode = .automatic
     @Published var customAllowedApps: Set<String> = [
-        "grok bot", "chatgpt", "antigravity", "signal", "whatsapp", "claude", "codex", "google chrome"
+        "grok bot", "chatgpt", "antigravity", "signal", "whatsapp", "claude", "codex", "cortex", "cubed code gpui", "google chrome"
     ]
     @Published var hiddenAppNamesInAutoMode: Set<String> = []
     @Published var defaultStageAppName: String = "" // "" = Automatic (Active Voice / AI Agent)
@@ -100,6 +100,10 @@ final class CommandCenterViewModel: ObservableObject {
     @Published var isShowingVoiceSlotEditor: Bool = false
 
     private var refreshTimer: Timer?
+    private var workspaceActivateObserver: NSObjectProtocol?
+    private var lastExternalFrontmostPID: pid_t?
+    private var lastFrontmostOnScreenWindowID: CGWindowID?
+    private var userPinnedWindowUntil: TimeInterval = 0
     private let defaultsKeySlotA = "cf15t.voice.slotA"
     private let defaultsKeySlotB = "cf15t.voice.slotB"
     private let defaultsKeySelectionMode = "cf15t.programs.mode"
@@ -153,7 +157,44 @@ final class CommandCenterViewModel: ObservableObject {
         }
         SiSTouchHardwareDriver.shared.start()
 
+        workspaceActivateObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            let pid = app.processIdentifier
+            guard pid != ProcessInfo.processInfo.processIdentifier else { return }
+            Task { @MainActor [weak self] in
+                self?.handleExternalAppActivated(pid: pid)
+            }
+        }
+
         startPeriodicRefresh()
+    }
+
+    private func handleExternalAppActivated(pid: pid_t) {
+        lastExternalFrontmostPID = pid
+        userPinnedWindowUntil = 0
+        let fetched = WindowTilingEngine.shared.fetchOpenWindows(capturePreviews: captureLivePreviews)
+        self.openWindows = fetched
+        if let match = fetched.first(where: { $0.ownerPID == pid && $0.id != 999_999 }) {
+            ensureWindowIsDisplayed(match)
+            lastFrontmostOnScreenWindowID = match.id
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+                stageWindowID = match.id
+            }
+            statusBannerMessage = "Active on laptop: \(match.appName)"
+        }
+    }
+
+    private func ensureWindowIsDisplayed(_ window: MonitoredWindow) {
+        excludedWindowIDs.remove(window.id)
+        let key = normalizedAppKey(window.appName)
+        hiddenAppNamesInAutoMode.remove(key)
+        if programSelectionMode == .customDefaults {
+            customAllowedApps.insert(key)
+        }
     }
 
     func startPeriodicRefresh() {
@@ -313,15 +354,18 @@ final class CommandCenterViewModel: ObservableObject {
         }
     }
 
-    var visibleTiledWindows: [MonitoredWindow] {
-        let filtered = openWindows.filter { win in
+    var allDisplayedWindows: [MonitoredWindow] {
+        openWindows.filter { win in
             !excludedWindowIDs.contains(win.id) && isProgramDisplayed(win.appName)
         }
-        return Array(filtered.prefix(max(1, maxTiledWindows)))
+    }
+
+    var visibleTiledWindows: [MonitoredWindow] {
+        Array(allDisplayedWindows.prefix(max(1, maxTiledWindows)))
     }
 
     var currentStageWindow: MonitoredWindow? {
-        let pool = visibleTiledWindows
+        let pool = allDisplayedWindows
         if let stageID = stageWindowID, let match = pool.first(where: { $0.id == stageID }) {
             return match
         }
@@ -360,14 +404,42 @@ final class CommandCenterViewModel: ObservableObject {
             statusBannerMessage = "Laptop Lid Closed — Command Center Locked ON TOP in Full Control Mode"
         }
 
-        let currentPool = visibleTiledWindows
+        // Follow whichever app/window is currently frontmost on the laptop whenever it changes
+        let selfPID = ProcessInfo.processInfo.processIdentifier
+        let frontApp = NSWorkspace.shared.frontmostApplication
+        let externalFrontPID: pid_t? = (frontApp?.processIdentifier != selfPID) ? frontApp?.processIdentifier : nil
+        let topmostLaptopWindow: MonitoredWindow? = {
+            if let extPID = externalFrontPID,
+               let match = fetchedWindows.first(where: { $0.ownerPID == extPID && $0.id != 999_999 }) {
+                return match
+            }
+            return fetchedWindows.first(where: { $0.id != 999_999 })
+        }()
+
+        let now = Date().timeIntervalSinceReferenceDate
+        if now >= userPinnedWindowUntil, let activeWin = topmostLaptopWindow {
+            let frontWindowChanged = (activeWin.id != lastFrontmostOnScreenWindowID)
+            let frontAppChanged = (externalFrontPID != nil && externalFrontPID != lastExternalFrontmostPID)
+            if frontWindowChanged || frontAppChanged {
+                lastFrontmostOnScreenWindowID = activeWin.id
+                if let extPID = externalFrontPID {
+                    lastExternalFrontmostPID = extPID
+                }
+                ensureWindowIsDisplayed(activeWin)
+                stageWindowID = activeWin.id
+            }
+        }
+
+        let currentPool = allDisplayedWindows
         if let currentID = stageWindowID, currentPool.contains(where: { $0.id == currentID }) {
-            // Keep existing stage selection
+            // Keep active stage selection
+        } else if let activeWin = topmostLaptopWindow {
+            ensureWindowIsDisplayed(activeWin)
+            stageWindowID = activeWin.id
         } else if !defaultStageAppName.isEmpty,
                   let preferred = currentPool.first(where: { normalizedAppKey($0.appName) == normalizedAppKey(defaultStageAppName) }) {
             stageWindowID = preferred.id
         } else {
-            // Smart default: prefer active Voice Agent window (Grok Bot or Dot/ChatGPT), then any AI agent, then first window
             let activeSlot = (activeVoiceSlotID == "slotA") ? slotA : slotB
             if let voiceWin = currentPool.first(where: { matchesVoiceSlot($0, slot: activeSlot) }) {
                 stageWindowID = voiceWin.id
@@ -630,14 +702,24 @@ final class CommandCenterViewModel: ObservableObject {
     // MARK: - Tap Border Window -> Promote to Center Stage + Tile Real Windows
 
     func promoteWindowToStage(_ window: MonitoredWindow) {
+        ensureWindowIsDisplayed(window)
+        userPinnedWindowUntil = Date().timeIntervalSinceReferenceDate + 5.0
+        lastFrontmostOnScreenWindowID = window.id
+        lastExternalFrontmostPID = window.ownerPID
+
         withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
             stageWindowID = window.id
         }
 
         if operatingMode == .fullControl {
-            // In FULL CONTROL mode, promote the tapped app to #1 Center Stage inside the Command Center
-            // (keeping the Command Center Always-On-Top so desktop windows never cover it!)
-            statusBannerMessage = "FULL CONTROL: \(window.appName) is now #1 Center Stage — Tap 🎙️ DICTATE to speak your next instruction"
+            // Focus the window on the laptop while keeping Command Center Always-On-Top on the CF15T screen
+            WindowTilingEngine.shared.focusWindow(window)
+            _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(
+                dockedTopBar: isFullControlDocked,
+                dockHeight: currentDockReserveHeight,
+                alwaysOnTop: true
+            )
+            statusBannerMessage = "FULL CONTROL: \(window.appName) is now #1 Center Stage — Tap 🎙️ TALK to speak your next instruction"
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                 self?.refreshAll(captureImages: true)
             }

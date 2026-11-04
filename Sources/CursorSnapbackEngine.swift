@@ -15,35 +15,12 @@ final class CursorSnapbackEngine {
     func startMonitoring() {
         stopMonitoring()
 
-        // Track cursor position whenever moving on the primary display (outside Command Center window)
+        // Track cursor position whenever moving on the primary display (outside Command Center window).
+        // Finger touches on the touchscreen are seized via IOHIDDeviceOpen(kIOHIDOptionsTypeSeizeDevice)
+        // and dispatched directly into the Command Center NSPanel without moving the mouse cursor,
+        // so physical mouse/trackpad/trackball clicks on either screen are never warped away.
         globalMouseMoveMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
             self?.recordMainScreenCursorIfApplicable()
-        }
-
-        // When clicking inside the Command Center app with Snapback enabled, restore cursor to previous position
-        localMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] event in
-            guard let self = self else { return event }
-            if self.isSnapbackEnabled && NSScreen.screens.count > 1 {
-                let targetPt = self.lastMainScreenPoint
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.065) {
-                    CGWarpMouseCursorPosition(targetPt)
-                    CGAssociateMouseAndMouseCursorPosition(1)
-                }
-            }
-            return event
-        }
-
-        // Also watch global mouse-up on secondary display (CF15T) if user touches another window on CF15T in Orchestrate mode
-        globalMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
-            guard let self = self, self.isSnapbackEnabled, NSScreen.screens.count > 1 else { return }
-            let currentQuartz = self.currentQuartzCursorPosition()
-            if !self.isPointOnPrimaryScreen(currentQuartz) {
-                let targetPt = self.lastMainScreenPoint
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                    CGWarpMouseCursorPosition(targetPt)
-                    CGAssociateMouseAndMouseCursorPosition(1)
-                }
-            }
         }
     }
 
@@ -132,7 +109,6 @@ final class CursorSnapbackEngine {
             window.level = alwaysOnTop ? .floating : .normal
             window.setFrame(vis, display: true, animate: true)
             window.orderFrontRegardless()
-            window.makeKeyAndOrderFront(nil)
             return "Command Center active on \(targetScreen.localizedName) (\(alwaysOnTop ? "Always-On-Top Full Control Shield" : "Orchestrate Mode"))"
         }
     }

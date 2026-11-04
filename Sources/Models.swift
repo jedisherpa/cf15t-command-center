@@ -5,9 +5,9 @@ import SwiftUI
 
 enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
     case grokBot = "Grok Bot"
+    case codex = "Codex"
     case dot = "Dot"
     case claude = "Claude"
-    case codex = "Codex"
     case antigravity = "Antigravity"
     case chatGPT = "ChatGPT"
     case cubedCode = "Cubed Code"
@@ -75,9 +75,9 @@ enum AgentPlatform: String, CaseIterable, Identifiable, Codable {
     var processMatchKeywords: [String] {
         switch self {
         case .grokBot: return ["grok bot", "com.anysphere.sand", "grokbot"]
-        case .dot: return ["chatgpt", "com.openai.codex", "com.openai.chat", "dot"]
+        case .codex: return ["com.openai.codex", "codex project picker", "codex"]
+        case .dot: return ["com.openai.chat", "dot"]
         case .claude: return ["claude", "anthropic"]
-        case .codex: return ["codex project picker", "codex"]
         case .antigravity: return ["antigravity", "language_server_macos"]
         case .chatGPT: return ["chatgpt", "com.openai.chat"]
         case .cubedCode: return ["cubed code"]

@@ -54,16 +54,29 @@ final class AppContentFeedExtractor {
             cropH = h * 0.90
 
         case .aiAgentThread:
-            // ChatGPT, Claude, Grok Bot, Antigravity: Skip left sidebar only if very wide
-            if w > 880 && (appLower.contains("chatgpt") || appLower.contains("claude") || appLower.contains("signal")) {
-                cropX = w * 0.20
-                cropW = w * 0.80
+            // Zoom into the active chat response column (skipping left thread list & right editor/artifact pane)
+            let bid = (window.bundleIdentifier ?? "").lowercased()
+            if w > 900 && (window.platform == .codex || bid.contains("com.openai.codex") || appLower.contains("codex")) {
+                cropX = w * 0.27
+                cropW = w * 0.51
+                cropY = h * 0.34
+                cropH = h * 0.58
+            } else if w > 900 && (window.platform == .antigravity || appLower.contains("antigravity")) {
+                cropX = w * 0.18
+                cropW = w * 0.41
+                cropY = h * 0.08
+                cropH = h * 0.80
+            } else if w > 880 && (appLower.contains("chatgpt") || appLower.contains("claude") || appLower.contains("signal")) {
+                cropX = w * 0.22
+                cropW = w * 0.76
+                cropY = h * 0.14
+                cropH = h * 0.78
             } else {
-                cropX = w * 0.01
-                cropW = w * 0.98
+                cropX = w * 0.02
+                cropW = w * 0.96
+                cropY = h * 0.08
+                cropH = h * 0.86
             }
-            cropY = h * 0.05
-            cropH = h * 0.92
 
         case .browserDocument:
             // Skip browser tab bar at top 8%
@@ -112,6 +125,17 @@ final class AppContentFeedExtractor {
             if let agyDigest = buildAntigravityLiveDigest(window: window) {
                 cachedDigests[window.id] = (now, agyDigest)
                 return agyDigest
+            }
+        }
+
+        // 1b. Direct Live Session Transcript Reader for Codex (com.openai.codex / ~/.codex/sessions)
+        let bundleLower = (window.bundleIdentifier ?? "").lowercased()
+        if window.platform == .codex ||
+           bundleLower.contains("com.openai.codex") ||
+           window.appName.localizedCaseInsensitiveContains("Codex") {
+            if let codexDigest = buildCodexLiveDigest(window: window) {
+                cachedDigests[window.id] = (now, codexDigest)
+                return codexDigest
             }
         }
 
@@ -225,7 +249,7 @@ final class AppContentFeedExtractor {
         defer { try? handle.close() }
 
         let fileSize = (try? handle.seekToEnd()) ?? 0
-        let readBytes: UInt64 = min(fileSize, 64_000)
+        let readBytes: UInt64 = min(fileSize, 180_000)
         if fileSize > readBytes {
             try? handle.seek(toOffset: fileSize - readBytes)
         } else {
@@ -235,7 +259,7 @@ final class AppContentFeedExtractor {
         guard let data = try? handle.readToEnd(),
               let rawString = String(data: data, encoding: .utf8) else { return nil }
 
-        let jsonLines = rawString.components(separatedBy: .newlines).suffix(40)
+        let jsonLines = rawString.components(separatedBy: .newlines)
         var feedLines: [DigestFeedLine] = []
         var latestActionSummary: String = "Active Coding & UI Session"
 
@@ -257,7 +281,7 @@ final class AppContentFeedExtractor {
                     feedLines.append(
                         DigestFeedLine(
                             id: "agy-u-\(idx)",
-                            speakerOrTag: "🗣️ YOUR GOAL",
+                            speakerOrTag: "🗣️ YOU",
                             text: clean,
                             isIncomingOrAgent: false,
                             isHighlighted: false
@@ -268,38 +292,24 @@ final class AppContentFeedExtractor {
                 if let toolCalls = obj["tool_calls"] as? [[String: Any]], !toolCalls.isEmpty {
                     var stepDescriptions: [String] = []
                     for tc in toolCalls {
-                        let rawName = (tc["name"] as? String ?? "").replacingOccurrences(of: "default_api:", with: "")
                         if let args = tc["arguments"] as? [String: Any] {
                             if let summary = args["toolSummary"] as? String, !summary.isEmpty {
                                 stepDescriptions.append(summary)
                             } else if let filePath = args["Path"] as? String {
                                 let base = (filePath as NSString).lastPathComponent
-                                stepDescriptions.append("\(rawName) → \(base)")
-                            } else {
-                                stepDescriptions.append(rawName)
+                                stepDescriptions.append("Editing \(base)")
                             }
-                        } else {
-                            stepDescriptions.append(rawName)
                         }
                     }
                     if !stepDescriptions.isEmpty {
                         let joined = stepDescriptions.joined(separator: " · ")
                         latestActionSummary = "Working: \(joined)"
-                        feedLines.append(
-                            DigestFeedLine(
-                                id: "agy-t-\(idx)",
-                                speakerOrTag: "⚙️ ACTION",
-                                text: joined,
-                                isIncomingOrAgent: true,
-                                isHighlighted: false
-                            )
-                        )
                     }
                 }
 
                 let cleanResp = cleanMarkdownString(content)
                 if cleanResp.count >= 6 {
-                    latestActionSummary = "Completed step — Ready for your next instruction"
+                    latestActionSummary = String(cleanResp.prefix(90))
                     feedLines.append(
                         DigestFeedLine(
                             id: "agy-r-\(idx)",
@@ -314,7 +324,7 @@ final class AppContentFeedExtractor {
         }
 
         guard !feedLines.isEmpty else { return nil }
-        var tail = Array(feedLines.suffix(7))
+        var tail = Array(feedLines.suffix(6))
         if !tail.isEmpty {
             for i in 0..<(tail.count - 1) {
                 tail[i] = DigestFeedLine(
@@ -343,6 +353,165 @@ final class AppContentFeedExtractor {
         )
     }
 
+    // MARK: - Layer 1b: Codex Live Session Reader (~/.codex/sessions)
+
+    func buildCodexLiveDigest(window: MonitoredWindow?) -> WindowLiveDigest? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let codexRoot = "\(home)/.codex"
+        let sessionsRoot = "\(codexRoot)/sessions"
+        let fm = FileManager.default
+
+        let targetTitle = (window?.windowTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        var matchedSessionIDs: Set<String> = []
+
+        if !targetTitle.isEmpty,
+           targetTitle.lowercased() != "codex",
+           targetTitle.lowercased() != "chatgpt",
+           let indexData = try? Data(contentsOf: URL(fileURLWithPath: "\(codexRoot)/session_index.jsonl")),
+           let indexStr = String(data: indexData, encoding: .utf8) {
+            let cleanTitle = targetTitle.lowercased()
+            for line in indexStr.components(separatedBy: .newlines) {
+                guard line.hasPrefix("{"),
+                      let d = line.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                      let sid = obj["id"] as? String,
+                      let tName = (obj["thread_name"] as? String)?.lowercased() else { continue }
+                if tName == cleanTitle || cleanTitle.contains(tName) || tName.contains(cleanTitle) {
+                    matchedSessionIDs.insert(sid)
+                }
+            }
+        }
+
+        var newestMatchPath: String?
+        var newestMatchDate: Date = .distantPast
+        var newestAnyPath: String?
+        var newestAnyDate: Date = .distantPast
+
+        if let enumerator = fm.enumerator(atPath: sessionsRoot) {
+            while let rel = enumerator.nextObject() as? String {
+                guard rel.hasSuffix(".jsonl") else { continue }
+                let full = "\(sessionsRoot)/\(rel)"
+                guard let attrs = try? fm.attributesOfItem(atPath: full),
+                      let modDate = attrs[.modificationDate] as? Date else { continue }
+                if modDate > newestAnyDate {
+                    newestAnyDate = modDate
+                    newestAnyPath = full
+                }
+                if !matchedSessionIDs.isEmpty,
+                   matchedSessionIDs.contains(where: { rel.contains($0) }),
+                   modDate > newestMatchDate {
+                    newestMatchDate = modDate
+                    newestMatchPath = full
+                }
+            }
+        }
+
+        guard let rolloutPath = newestMatchPath ?? newestAnyPath,
+              let handle = FileHandle(forReadingAtPath: rolloutPath) else {
+            return nil
+        }
+        defer { try? handle.close() }
+
+        let fileSize = (try? handle.seekToEnd()) ?? 0
+        let readBytes: UInt64 = min(fileSize, 750_000)
+        if fileSize > readBytes {
+            try? handle.seek(toOffset: fileSize - readBytes)
+        } else {
+            try? handle.seek(toOffset: 0)
+        }
+
+        guard let data = try? handle.readToEnd(),
+              let rawString = String(data: data, encoding: .utf8) else { return nil }
+
+        var feedLines: [DigestFeedLine] = []
+        var latestSummary: String = targetTitle.isEmpty ? "Codex Session" : targetTitle
+
+        let jsonLines = rawString.components(separatedBy: .newlines)
+        for (idx, line) in jsonLines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("{"),
+                  let lineData = trimmed.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  let type = obj["type"] as? String,
+                  let payload = obj["payload"] as? [String: Any] else { continue }
+
+            if type == "response_item", (payload["type"] as? String) == "message" {
+                let role = (payload["role"] as? String) ?? ""
+                guard role == "user" || role == "assistant" else { continue }
+                let contentArr = (payload["content"] as? [[String: Any]]) ?? []
+                let rawTexts = contentArr.compactMap { $0["text"] as? String }
+                let combined = rawTexts.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                if combined.isEmpty ||
+                   combined.hasPrefix("<environment_context>") ||
+                   combined.hasPrefix("<permissions") ||
+                   combined.hasPrefix("# AGENTS.md") ||
+                   combined.hasPrefix("<INSTRUCTIONS>") {
+                    continue
+                }
+                let cleaned = cleanMarkdownString(combined)
+                guard cleaned.count >= 6 else { continue }
+                if role == "user" {
+                    feedLines.append(
+                        DigestFeedLine(
+                            id: "codex-u-\(idx)",
+                            speakerOrTag: "🗣️ YOU",
+                            text: cleaned,
+                            isIncomingOrAgent: false,
+                            isHighlighted: false
+                        )
+                    )
+                } else {
+                    latestSummary = targetTitle.isEmpty ? String(cleaned.prefix(85)) : targetTitle
+                    // Avoid duplicate back-to-back identical assistant messages
+                    if feedLines.last?.text != cleaned {
+                        feedLines.append(
+                            DigestFeedLine(
+                                id: "codex-a-\(idx)",
+                                speakerOrTag: "🤖 CODEX",
+                                text: cleaned,
+                                isIncomingOrAgent: true,
+                                isHighlighted: true
+                            )
+                        )
+                    }
+                }
+            } else if type == "event_msg",
+                      (payload["type"] as? String) == "task_complete",
+                      let lastMsg = payload["last_agent_message"] as? String {
+                let cleaned = cleanMarkdownString(lastMsg)
+                if cleaned.count >= 6 && feedLines.last?.text != cleaned {
+                    feedLines.append(
+                        DigestFeedLine(
+                            id: "codex-tc-\(idx)",
+                            speakerOrTag: "🤖 CODEX",
+                            text: cleaned,
+                            isIncomingOrAgent: true,
+                            isHighlighted: true
+                        )
+                    )
+                }
+            }
+        }
+
+        guard !feedLines.isEmpty else { return nil }
+        var tail = Array(feedLines.suffix(6))
+        for i in 0..<(tail.count - 1) {
+            tail[i] = DigestFeedLine(
+                id: tail[i].id,
+                speakerOrTag: tail[i].speakerOrTag,
+                text: tail[i].text,
+                isIncomingOrAgent: tail[i].isIncomingOrAgent,
+                isHighlighted: false
+            )
+        }
+        return WindowLiveDigest(
+            style: .aiAgentThread,
+            contextTitle: latestSummary,
+            statusBadge: "🟢 LIVE CODEX THREAD",
+            lines: tail
+        )
+    }
+
     private func cleanUserRequestString(_ raw: String) -> String {
         var s = raw
         if let startRange = s.range(of: "<USER_REQUEST>"),
@@ -351,12 +520,27 @@ final class AppContentFeedExtractor {
         }
         if s.contains("<SYSTEM_MESSAGE>") { return "" }
         return s
+            .replacingOccurrences(of: "... [truncated]", with: "")
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func cleanMarkdownString(_ raw: String) -> String {
-        let lines = raw
+        var text = raw.replacingOccurrences(of: "... [truncated]", with: "")
+        // Strip <oai-mem-citation>...</oai-mem-citation> blocks
+        while let start = text.range(of: "<oai-mem-citation>"),
+              let end = text.range(of: "</oai-mem-citation>", range: start.upperBound..<text.endIndex) {
+            text.removeSubrange(start.lowerBound..<end.upperBound)
+        }
+        if let orphan = text.range(of: "<oai-mem-citation>") {
+            text = String(text[..<orphan.lowerBound])
+        }
+        // Collapse markdown links [label](url) -> label
+        if let regex = try? NSRegularExpression(pattern: "\\[([^\\]]+)\\]\\([^\\)]+\\)") {
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            text = regex.stringByReplacingMatches(in: text, range: range, withTemplate: "$1")
+        }
+        let lines = text
             .components(separatedBy: .newlines)
             .map {
                 $0.replacingOccurrences(of: "### ", with: "")
@@ -366,7 +550,7 @@ final class AppContentFeedExtractor {
                   .trimmingCharacters(in: .whitespacesAndNewlines)
             }
             .filter { !$0.isEmpty && !$0.hasPrefix("---") }
-        return lines.prefix(5).joined(separator: " • ")
+        return lines.prefix(8).joined(separator: " • ")
     }
 
     // MARK: - Layer 2: macOS Accessibility (AXUIElement) Deep Main-Pane Harvester

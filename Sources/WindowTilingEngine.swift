@@ -86,11 +86,17 @@ final class WindowTilingEngine {
             let runningApp = runningAppsByPID[ownerPID]
             let bundleID = runningApp?.bundleIdentifier
             let appIcon = runningApp?.icon
+            let resolvedAppName: String = {
+                if let bid = bundleID?.lowercased(), bid.contains("com.openai.codex") {
+                    return "Codex"
+                }
+                return ownerName
+            }()
 
             let idx = perAppWindowCounter[ownerPID, default: 0]
             perAppWindowCounter[ownerPID] = idx + 1
 
-            let detectedPlatform = detectPlatform(appName: ownerName, bundleID: bundleID, windowTitle: title)
+            let detectedPlatform = detectPlatform(appName: resolvedAppName, bundleID: bundleID, windowTitle: title)
             var preview: NSImage? = nil
             if capturePreviews {
                 preview = captureWindowSnapshot(windowID: CGWindowID(windowNumber))
@@ -99,7 +105,7 @@ final class WindowTilingEngine {
             var win = MonitoredWindow(
                 id: CGWindowID(windowNumber),
                 ownerPID: ownerPID,
-                appName: ownerName,
+                appName: resolvedAppName,
                 bundleIdentifier: bundleID,
                 windowTitle: title,
                 bounds: bounds,

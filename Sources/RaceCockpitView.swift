@@ -733,25 +733,54 @@ struct RaceLiveScreen: View {
     let info: RaceAppInfo
     let m: RaceMetrics
     @Binding var showWholeWindow: Bool
+    @State private var showChatTextMode: Bool = false
 
     var body: some View {
         let win: MonitoredWindow = info.window
-        let img: NSImage? = showWholeWindow
-            ? (win.previewImage ?? win.focusedContentImage)
-            : (win.focusedContentImage ?? win.previewImage)
+        let closeUpImg: NSImage? = win.focusedContentImage ?? win.previewImage
+        let wholeImg: NSImage? = win.previewImage ?? win.focusedContentImage
+        let activeImg: NSImage? = showWholeWindow ? wholeImg : closeUpImg
+        let hasValidImg: Bool = (activeImg?.size.width ?? 0) > 4 && (activeImg?.size.height ?? 0) > 4
+        let shouldShowChatPane: Bool = showChatTextMode || !hasValidImg
         let outer = RoundedRectangle(cornerRadius: m.s(24))
         let inner = RoundedRectangle(cornerRadius: m.s(18))
 
-        VStack(spacing: m.s(8)) {
-            Button(action: { showWholeWindow.toggle() }) {
-                ZStack(alignment: .topLeading) {
-                    inner.fill(Color.black)
+        let badgeLabel: String = {
+            if shouldShowChatPane {
+                return "LIVE · chat response"
+            }
+            return showWholeWindow ? "LIVE · whole window" : "LIVE · close-up"
+        }()
 
-                    if let img = img, img.size.width > 4, img.size.height > 4 {
+        VStack(spacing: m.s(8)) {
+            Button(action: {
+                if !hasValidImg {
+                    showChatTextMode = true
+                } else if !showChatTextMode && !showWholeWindow {
+                    showChatTextMode = true
+                } else if showChatTextMode {
+                    showChatTextMode = false
+                    showWholeWindow = true
+                } else {
+                    showWholeWindow = false
+                    showChatTextMode = false
+                }
+            }) {
+                ZStack(alignment: .topLeading) {
+                    inner.fill(Color(red: 0.04, green: 0.04, blue: 0.055))
+
+                    if !shouldShowChatPane, let img = activeImg {
                         Image(nsImage: img)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipShape(inner)
+                    } else if !info.digest.lines.isEmpty {
+                        RaceLiveChatResponsePane(info: info, m: m)
+                            .padding(.top, m.s(46))
+                            .padding(.horizontal, m.s(14))
+                            .padding(.bottom, m.s(12))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             .clipShape(inner)
                     } else {
                         RaceAppIcon(window: win, size: m.s(110))
@@ -761,13 +790,13 @@ struct RaceLiveScreen: View {
                     HStack(spacing: m.s(8)) {
                         Text("●")
                             .foregroundColor(RacePalette.red)
-                        Text(showWholeWindow ? "LIVE · whole window" : "LIVE · close-up")
+                        Text(badgeLabel)
                             .foregroundColor(.white)
                     }
                     .font(RaceType.font(m.s(20), .heavy, italic: false))
                     .padding(.horizontal, m.s(16))
                     .padding(.vertical, m.s(6))
-                    .background(Capsule().fill(Color.black.opacity(0.8)))
+                    .background(Capsule().fill(Color.black.opacity(0.82)))
                     .padding(m.s(12))
                 }
                 .padding(m.s(6))
@@ -785,9 +814,62 @@ struct RaceLiveScreen: View {
             .buttonStyle(.plain)
 
             if !m.isBar {
-                Text(showWholeWindow ? "👆 Tap the picture for a close-up" : "👆 Tap the picture to see the whole window")
-                    .font(RaceType.font(m.s(20), .semibold, italic: false))
+                Text("👆 Tap the screen to switch: close-up · chat response · whole window")
+                    .font(RaceType.font(m.s(19), .semibold, italic: false))
                     .foregroundColor(RacePalette.muted)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
+struct RaceLiveChatResponsePane: View {
+    let info: RaceAppInfo
+    let m: RaceMetrics
+
+    var body: some View {
+        let lines: [DigestFeedLine] = info.digest.lines
+        let latestPrompt: DigestFeedLine? = lines.last(where: { !$0.isIncomingOrAgent })
+        let latestResponse: DigestFeedLine? = lines.last(where: { $0.isIncomingOrAgent }) ?? lines.last
+        let promptShape = RoundedRectangle(cornerRadius: m.s(14))
+        let respShape = RoundedRectangle(cornerRadius: m.s(16))
+
+        VStack(alignment: .leading, spacing: m.s(10)) {
+            if let prompt = latestPrompt, prompt.id != latestResponse?.id {
+                VStack(alignment: .leading, spacing: m.s(3)) {
+                    Text("🗣️ YOU ASKED")
+                        .font(RaceType.font(m.s(17), .heavy))
+                        .foregroundColor(Color(red: 0.56, green: 0.78, blue: 1.0))
+                    Text(RaceAppInfo.clip(prompt.text, 180))
+                        .font(RaceType.font(m.s(21), .semibold, italic: false))
+                        .foregroundColor(Color(white: 0.92))
+                        .lineLimit(m.isBar ? 2 : 3)
+                        .minimumScaleFactor(0.75)
+                }
+                .padding(.horizontal, m.s(14))
+                .padding(.vertical, m.s(10))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(promptShape.fill(Color(red: 0.10, green: 0.16, blue: 0.28)))
+                .overlay(promptShape.stroke(Color(red: 0.24, green: 0.42, blue: 0.72), lineWidth: m.s(1.5)))
+            }
+
+            if let resp = latestResponse {
+                VStack(alignment: .leading, spacing: m.s(6)) {
+                    Text("💬 \(info.window.appName.uppercased()) RESPONSE")
+                        .font(RaceType.font(m.s(19), .heavy))
+                        .foregroundColor(RacePalette.yellow)
+                    Text(RaceAppInfo.clip(resp.text, 520))
+                        .font(RaceType.font(m.isBar ? m.s(22) : m.s(25), .bold, italic: false))
+                        .foregroundColor(.white)
+                        .lineLimit(m.isBar ? 6 : 11)
+                        .minimumScaleFactor(0.68)
+                        .fixedSize(horizontal: false, vertical: false)
+                }
+                .padding(.horizontal, m.s(16))
+                .padding(.vertical, m.s(12))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(respShape.fill(Color(red: 0.08, green: 0.11, blue: 0.09)))
+                .overlay(respShape.stroke(RacePalette.green.opacity(0.55), lineWidth: m.s(2)))
             }
         }
     }
@@ -800,40 +882,46 @@ struct RaceRightNowColumn: View {
     let info: RaceAppInfo
     let m: RaceMetrics
 
+    private var primaryLine: DigestFeedLine? {
+        let lines = info.digest.lines
+        return lines.last(where: { $0.isIncomingOrAgent && $0.text.count >= 6 }) ?? lines.last
+    }
+
     private var rightNowText: String {
         let appName = info.window.appName
-        guard let latest = info.digest.lines.last else {
+        guard let latest = primaryLine else {
             return "\(appName) is open and ready."
         }
         if !latest.isIncomingOrAgent {
             return "You asked: \"\(RaceAppInfo.clip(latest.text, 200))\""
         }
+        let sentences = RaceAppInfo.splitSentences(latest.text.replacingOccurrences(of: " • ", with: ". "))
         if let q = info.question {
-            // Don't repeat the question — it gets its own big card below
-            let sentences = RaceAppInfo.splitSentences(latest.text)
-            let rest = sentences.filter { !$0.contains("?") }.joined(separator: " ")
+            let rest = sentences.filter { !$0.contains("?") }.prefix(2).joined(separator: " ")
             let trimmed = rest.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty || trimmed == q {
                 return "\(appName) has a question for you."
             }
-            return RaceAppInfo.clip(trimmed, 240)
+            return RaceAppInfo.clip(trimmed, 220)
         }
-        return RaceAppInfo.clip(latest.text, 260)
+        let headline = sentences.prefix(2).joined(separator: " ")
+        return RaceAppInfo.clip(headline.isEmpty ? latest.text : headline, 220)
     }
 
     var body: some View {
         let lines: [DigestFeedLine] = info.digest.lines
-        let earlier: [DigestFeedLine] = Array(lines.dropLast().suffix(m.isBar ? 1 : 2))
+        let primaryID: String? = primaryLine?.id
+        let earlier: [DigestFeedLine] = Array(lines.filter { $0.id != primaryID }.suffix(m.isBar ? 2 : 3))
         let showHistory: Bool = !earlier.isEmpty && (!m.isBar || info.question == nil)
 
         VStack(alignment: .leading, spacing: m.s(14)) {
             RaceSectionLabel(text: "RIGHT NOW", m: m)
 
             Text(rightNowText)
-                .font(RaceType.font(m.isBar ? m.t(34) : m.t(44), .heavy))
+                .font(RaceType.font(m.isBar ? m.t(28) : m.t(36), .heavy, italic: false))
                 .foregroundColor(.white)
                 .lineLimit(m.isBar ? 3 : 4)
-                .minimumScaleFactor(0.6)
+                .minimumScaleFactor(0.65)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let q = info.question {

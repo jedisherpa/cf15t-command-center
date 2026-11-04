@@ -46,6 +46,7 @@ final class SiSTouchHardwareDriver {
         var lastDispatchedDownPoint: CGPoint = .zero
         var isCurrentTouchDragging: Bool = false
         var lastTwoFingerMidpoint: CGPoint? = nil
+        var currentEventNumber: Int = 100
         let resolveScreen: () -> NSScreen?
 
         init(resolveScreen: @escaping () -> NSScreen?) {
@@ -135,6 +136,10 @@ final class SiSTouchHardwareDriver {
         let key = deviceKey(device)
         guard !connectedDeviceKeys.contains(key) else { return }
         connectedDeviceKeys.insert(key)
+
+        // Seize the USB touchscreen so macOS WindowServer does NOT treat finger touches as mouse cursor movements.
+        // This lets the user's physical mouse, trackpad, and trackball keep independent control of the cursor.
+        _ = IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeSeizeDevice))
 
         let vid = intProperty(device, kIOHIDVendorIDKey)
         let pid = intProperty(device, kIOHIDProductIDKey)
@@ -362,9 +367,6 @@ final class SiSTouchHardwareDriver {
             if shouldDispatch {
                 dispatchTouch(phase: .ended, normalizedPt: releasePoint, stream: stream)
             }
-            if !isFullControlSystemTouchMode && CursorSnapbackEngine.shared.isSnapbackEnabled {
-                CursorSnapbackEngine.shared.warpBackToSavedMainScreenPositionNow()
-            }
         }
 
         notifyObserver()
@@ -377,48 +379,46 @@ final class SiSTouchHardwareDriver {
     }
 
     private func dispatchTwoFingerScroll(normalizedDelta: CGPoint, atNormalized normalizedPt: CGPoint, stream: TouchStream) {
-        DispatchQueue.main.async {
-            guard let screen = stream.resolveScreen() else { return }
-            let bounds = DisplayTargetManager.shared.quartzBounds(of: screen)
-            let dxPixels = Int32(normalizedDelta.x * bounds.width * 1.4)
-            let dyPixels = Int32(normalizedDelta.y * bounds.height * 1.4)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let screen = stream.resolveScreen() else { return }
+            let screenFrame = screen.frame
+            let dxPixels = Int32(normalizedDelta.x * screenFrame.width * 1.4)
+            let dyPixels = Int32(normalizedDelta.y * screenFrame.height * 1.4)
             guard abs(dyPixels) >= 2 || abs(dxPixels) >= 2 else { return }
 
-            let targetX = bounds.minX + normalizedPt.x * bounds.width
-            let targetY = bounds.minY + normalizedPt.y * bounds.height
-            CGWarpMouseCursorPosition(CGPoint(x: targetX, y: targetY))
-            CGAssociateMouseAndMouseCursorPosition(1)
+            let screenPoint = NSPoint(
+                x: screenFrame.minX + normalizedPt.x * screenFrame.width,
+                y: screenFrame.maxY - normalizedPt.y * screenFrame.height
+            )
 
-            if let scrollEv = CGEvent(
-                scrollWheelEvent2Source: nil,
-                units: .pixel,
-                wheelCount: 2,
-                wheel1: dyPixels,
-                wheel2: dxPixels,
-                wheel3: 0
-            ) {
-                scrollEv.post(tap: .cghidEventTap)
+            // Deliver scroll directly into the Command Center window without moving the mouse cursor
+            if let window = self.targetCommandCenterWindow ?? NSApp.windows.first(where: { $0.isVisible }),
+               window.isVisible,
+               window.frame.contains(screenPoint),
+               let cgScroll = CGEvent(
+                   scrollWheelEvent2Source: nil,
+                   units: .pixel,
+                   wheelCount: 2,
+                   wheel1: dyPixels,
+                   wheel2: dxPixels,
+                   wheel3: 0
+               ),
+               let nsScroll = NSEvent(cgEvent: cgScroll) {
+                window.sendEvent(nsScroll)
             }
         }
     }
 
     /// Converts a normalized (0..1, 0..1) touch on a given touchscreen into that screen's space.
-    /// - If the touch lands inside the Command Center window, sends an AppKit NSEvent directly to it.
-    /// - In FULL CONTROL mode, a touch on any other app window posts a system-wide click/drag there.
+    /// - If the touch lands inside the Command Center window, sends a direct AppKit NSEvent to it
+    ///   WITHOUT moving or hijacking the macOS mouse cursor.
+    /// - Only if touching an external app window outside the Command Center in FULL CONTROL dock mode
+    ///   does it post a system-wide CGEvent.
     private func dispatchTouch(phase: TouchPhaseType, normalizedPt: CGPoint, stream: TouchStream) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             guard let screen = stream.resolveScreen() else { return }
 
-            let bounds = DisplayTargetManager.shared.quartzBounds(of: screen)
-            let targetQuartzPt = CGPoint(
-                x: bounds.minX + normalizedPt.x * bounds.width,
-                y: bounds.minY + normalizedPt.y * bounds.height
-            )
-            CGWarpMouseCursorPosition(targetQuartzPt)
-            CGAssociateMouseAndMouseCursorPosition(1)
-
-            // Is the touch inside our visible Command Center window? (global AppKit coordinates)
             let screenFrame = screen.frame
             let screenPoint = NSPoint(
                 x: screenFrame.minX + normalizedPt.x * screenFrame.width,
@@ -435,9 +435,7 @@ final class SiSTouchHardwareDriver {
                 let eventType: NSEvent.EventType
                 switch phase {
                 case .began:
-                    if !window.isKeyWindow {
-                        window.makeKeyAndOrderFront(nil)
-                    }
+                    stream.currentEventNumber += 1
                     eventType = .leftMouseDown
                 case .moved:
                     eventType = .leftMouseDragged
@@ -452,7 +450,7 @@ final class SiSTouchHardwareDriver {
                     timestamp: ProcessInfo.processInfo.systemUptime,
                     windowNumber: window.windowNumber,
                     context: nil,
-                    eventNumber: 0,
+                    eventNumber: stream.currentEventNumber,
                     clickCount: 1,
                     pressure: phase == .ended ? 0.0 : 1.0
                 ) {
@@ -461,9 +459,13 @@ final class SiSTouchHardwareDriver {
                 return
             }
 
-            // Outside the Command Center (e.g. Signal, ChatGPT, Chrome on that screen):
-            // in FULL CONTROL mode, post a system-wide mouse click/drag there.
+            // Outside the Command Center (e.g. docked mode where an app sits below the top bar):
             if self.isFullControlSystemTouchMode {
+                let bounds = DisplayTargetManager.shared.quartzBounds(of: screen)
+                let targetQuartzPt = CGPoint(
+                    x: bounds.minX + normalizedPt.x * bounds.width,
+                    y: bounds.minY + normalizedPt.y * bounds.height
+                )
                 let cgType: CGEventType
                 switch phase {
                 case .began: cgType = .leftMouseDown

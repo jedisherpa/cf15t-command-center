@@ -1,6 +1,18 @@
 import Cocoa
 import SwiftUI
 
+/// Non-activating cockpit instrument panel: responds on the very first touch or mouse click
+/// without stealing active-app status or moving the cursor away from the laptop screen.
+final class TouchInstrumentPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var needsPanelToBecomeKey: Bool { false }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var mainWindow: NSWindow?
@@ -63,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func createAndShowMainWindow() {
         let contentView = CommandCenterMainView(viewModel: viewModel)
-        let hostingController = NSHostingController(rootView: contentView)
+        let hostingView = FirstMouseHostingView(rootView: contentView)
 
         // Full screen on the touchscreen (15.6" CF15T or 12.3" bar), or a centred window on the laptop alone
         let screens = NSScreen.screens
@@ -86,15 +98,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }()
 
-        let window = NSWindow(
+        let window = TouchInstrumentPanel(
             contentRect: initialFrame,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         window.title = "CF15T Auxiliary Command Center — Windows • Agents • Voice (Grok Bot ⇄ Dot)"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        window.isFloatingPanel = false
+        window.becomesKeyOnlyIfNeeded = false
+        window.hidesOnDeactivate = false
+        window.worksWhenModal = true
+        window.acceptsMouseMovedEvents = true
         // Hide the traffic-light buttons so they don't sit on top of the touch controls (quit from the menu bar item)
         window.standardWindowButton(.closeButton)?.isHidden = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
@@ -102,12 +119,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The app places itself on the touchscreen; don't let touches near the top drag the window around
         window.isMovable = false
         window.backgroundColor = NSColor(calibratedRed: 0.05, green: 0.06, blue: 0.09, alpha: 1.0)
-        window.contentViewController = hostingController
+        window.contentView = hostingView
         window.minSize = NSSize(width: 640, height: 360)
         window.setFrame(initialFrame, display: true)
-        window.collectionBehavior = [.managed, .fullScreenPrimary]
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        window.collectionBehavior = [.managed, .fullScreenPrimary, .canJoinAllSpaces]
+        window.orderFrontRegardless()
 
         self.mainWindow = window
         SiSTouchHardwareDriver.shared.targetCommandCenterWindow = window
