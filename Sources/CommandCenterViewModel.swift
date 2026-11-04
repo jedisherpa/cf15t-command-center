@@ -103,7 +103,7 @@ final class CommandCenterViewModel: ObservableObject {
     private var workspaceActivateObserver: NSObjectProtocol?
     private var lastExternalFrontmostPID: pid_t?
     private var lastFrontmostOnScreenWindowID: CGWindowID?
-    private var userPinnedWindowUntil: TimeInterval = 0
+    private var userPinnedWindowUntil: TimeInterval = Date().timeIntervalSinceReferenceDate + 3600.0
     private var isBackgroundRefreshInFlight: Bool = false
     private let backgroundScanQueue = DispatchQueue(label: "com.paulcooper.cf15t.scanner", qos: .userInitiated)
     private let defaultsKeySlotA = "cf15t.voice.slotA"
@@ -471,8 +471,20 @@ final class CommandCenterViewModel: ObservableObject {
                 }()
 
                 let now = Date().timeIntervalSinceReferenceDate
-                if let extPID = nonZoomExternalFrontPID,
-                   let activeWin = fetchedWindows.first(where: { $0.ownerPID == extPID && $0.id != 999_999 && !self.isZoomWindow($0) }) {
+                let currentPool = self.allDisplayedWindows
+
+                if self.stageWindowID == nil {
+                    let savedStageApp = UserDefaults.standard.string(forKey: "cf15t.state.lastStageAppName") ?? "Grok Bot"
+                    if let savedMatch = currentPool.first(where: { self.normalizedAppKey($0.appName) == self.normalizedAppKey(savedStageApp) }) {
+                        self.stageWindowID = savedMatch.id
+                    }
+                    if let extPID = nonZoomExternalFrontPID,
+                       let activeWin = fetchedWindows.first(where: { $0.ownerPID == extPID && $0.id != 999_999 && !self.isZoomWindow($0) }) {
+                        self.lastFrontmostOnScreenWindowID = activeWin.id
+                        self.lastExternalFrontmostPID = extPID
+                    }
+                } else if let extPID = nonZoomExternalFrontPID,
+                          let activeWin = fetchedWindows.first(where: { $0.ownerPID == extPID && $0.id != 999_999 && !self.isZoomWindow($0) }) {
                     let frontWindowChanged = (activeWin.id != self.lastFrontmostOnScreenWindowID)
                     let frontAppChanged = (extPID != self.lastExternalFrontmostPID)
                     self.lastFrontmostOnScreenWindowID = activeWin.id
@@ -483,23 +495,27 @@ final class CommandCenterViewModel: ObservableObject {
                     }
                 }
 
-                let currentPool = self.allDisplayedWindows
                 if let currentID = self.stageWindowID, currentPool.contains(where: { $0.id == currentID }) {
                     // Keep active stage selection
-                } else if let activeWin = topmostLaptopWindow {
-                    self.ensureWindowIsDisplayed(activeWin)
-                    self.stageWindowID = activeWin.id
-                } else if !self.defaultStageAppName.isEmpty,
-                          let preferred = currentPool.first(where: { self.normalizedAppKey($0.appName) == self.normalizedAppKey(self.defaultStageAppName) }) {
-                    self.stageWindowID = preferred.id
                 } else {
-                    let activeSlot = (self.activeVoiceSlotID == "slotA") ? self.slotA : self.slotB
-                    if let voiceWin = currentPool.first(where: { self.matchesVoiceSlot($0, slot: activeSlot) }) {
-                        self.stageWindowID = voiceWin.id
-                    } else if let aiWin = currentPool.first(where: { $0.platform != nil }) {
-                        self.stageWindowID = aiWin.id
+                    let savedStageApp = UserDefaults.standard.string(forKey: "cf15t.state.lastStageAppName") ?? "Grok Bot"
+                    if let savedMatch = currentPool.first(where: { self.normalizedAppKey($0.appName) == self.normalizedAppKey(savedStageApp) }) {
+                        self.stageWindowID = savedMatch.id
+                    } else if let activeWin = topmostLaptopWindow {
+                        self.ensureWindowIsDisplayed(activeWin)
+                        self.stageWindowID = activeWin.id
+                    } else if !self.defaultStageAppName.isEmpty,
+                              let preferred = currentPool.first(where: { self.normalizedAppKey($0.appName) == self.normalizedAppKey(self.defaultStageAppName) }) {
+                        self.stageWindowID = preferred.id
                     } else {
-                        self.stageWindowID = currentPool.first?.id
+                        let activeSlot = (self.activeVoiceSlotID == "slotA") ? self.slotA : self.slotB
+                        if let voiceWin = currentPool.first(where: { self.matchesVoiceSlot($0, slot: activeSlot) }) {
+                            self.stageWindowID = voiceWin.id
+                        } else if let aiWin = currentPool.first(where: { $0.platform != nil }) {
+                            self.stageWindowID = aiWin.id
+                        } else {
+                            self.stageWindowID = currentPool.first?.id
+                        }
                     }
                 }
             }
@@ -733,6 +749,7 @@ final class CommandCenterViewModel: ObservableObject {
 
     func promoteWindowToStage(_ window: MonitoredWindow) {
         ensureWindowIsDisplayed(window)
+        UserDefaults.standard.set(window.appName, forKey: "cf15t.state.lastStageAppName")
         // Pin the user's selected app on the CF15T Command Center so clicking in Zoom on the laptop never resets it
         userPinnedWindowUntil = Date().timeIntervalSinceReferenceDate + 3600.0
 

@@ -58,9 +58,15 @@ final class AppContentFeedExtractor {
             cropH = h * 0.90
 
         case .aiAgentThread:
-            // Crop to the main conversation & workspace area with a wide aspect ratio so it fills the live screen box
+            // Crop to the main conversation & workspace area so it shows the active chat clearly
             let bid = (window.bundleIdentifier ?? "").lowercased()
-            if w > 900 && (window.platform == .codex || bid.contains("com.openai.codex") || appLower.contains("codex")) {
+            if w > 640 && (appLower.contains("grok") || bid.contains("com.anysphere.sand")) {
+                // Grok Bot: left 31% is the bot/thread list sidebar; bottom-right 69% is the active bot response
+                cropX = w * 0.31
+                cropW = w * 0.69
+                cropY = h * 0.36
+                cropH = h * 0.57
+            } else if w > 900 && (window.platform == .codex || bid.contains("com.openai.codex") || appLower.contains("codex")) {
                 cropX = w * 0.22
                 cropW = w * 0.76
                 cropY = h * 0.08
@@ -198,7 +204,8 @@ final class AppContentFeedExtractor {
         }
 
         // 2. Harvest live text blocks from macOS Accessibility tree (Main-Pane-First Deep Walk)
-        let axBlocks = harvestAXTextBlocks(for: window).filter { blk in
+        let isGrokBot = window.appName.localizedCaseInsensitiveContains("Grok") || bundleLower.contains("com.anysphere.sand")
+        let axBlocks: [SpatialTextBlock] = isGrokBot ? [] : harvestAXTextBlocks(for: window).filter { blk in
             let lower = blk.text.lowercased()
             return lower != window.appName.lowercased() && lower != window.windowTitle.lowercased()
         }
@@ -206,11 +213,16 @@ final class AppContentFeedExtractor {
         // 3. Fuse with Apple Vision OCR on the live window image whenever AX has fewer than 5 substantive lines
         var finalBlocks = axBlocks
         let substantiveAXCount = axBlocks.filter { $0.text.count >= 18 }.count
-        if substantiveAXCount < 4 {
+        if substantiveAXCount < 4 || isGrokBot {
             let sourceImage = window.focusedContentImage ?? cropActiveConversationImage(from: window.previewImage, for: window) ?? window.previewImage
             if let img = sourceImage {
-                let ocrBlocks = extractVisionOCRBlocks(from: img, windowBounds: window.bounds)
-                if ocrBlocks.count > finalBlocks.count || substantiveAXCount < 2 {
+                let ocrBlocks = extractVisionOCRBlocks(from: img, windowBounds: window.bounds).filter { blk in
+                    let l = blk.text.lowercased()
+                    return !l.hasPrefix("+ message") && l != "handling it" && !l.hasPrefix("today ")
+                }
+                if isGrokBot {
+                    finalBlocks = ocrBlocks
+                } else if ocrBlocks.count > finalBlocks.count || substantiveAXCount < 2 {
                     finalBlocks = mergeAXAndOCRBlocks(axBlocks: axBlocks, ocrBlocks: ocrBlocks)
                 }
             }
@@ -835,7 +847,7 @@ final class AppContentFeedExtractor {
                 )
             }
         }
-        request.recognitionLevel = .fast
+        request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
 
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
@@ -903,9 +915,9 @@ final class AppContentFeedExtractor {
             // Group vertically consecutive lines that belong to the same message bubble or response paragraph
             if let last = merged.last,
                last.hasExplicitFrame && block.hasExplicitFrame,
-               (block.frame.minY - last.frame.maxY) < 28,
-               abs(block.frame.minX - last.frame.minX) < 95,
-               last.text.count < 360 {
+               (block.frame.minY - last.frame.maxY) < 42,
+               abs(block.frame.minX - last.frame.minX) < 140,
+               last.text.count < 520 {
                 let combinedText = "\(last.text) \(block.text)"
                 let unionFrame = last.frame.union(block.frame)
                 merged[merged.count - 1] = SpatialTextBlock(
@@ -982,12 +994,13 @@ final class AppContentFeedExtractor {
             }()
 
             let clippedText = blk.text.count > 310 ? String(blk.text.prefix(307)) + "…" : blk.text
+            let isFromAgentOrIncoming = (speakerTag != "🗣️ YOU")
             lines.append(
                 DigestFeedLine(
                     id: "\(window.id)-\(idx)-\(clippedText.prefix(20).hashValue)",
                     speakerOrTag: speakerTag,
                     text: clippedText,
-                    isIncomingOrAgent: !isRightSide,
+                    isIncomingOrAgent: isFromAgentOrIncoming,
                     isHighlighted: isLast
                 )
             )

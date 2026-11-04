@@ -185,11 +185,13 @@ struct RaceAppInfo {
         return RaceAppInfo(window: window, digest: digest, cpu: cpu, status: status, question: question, statusLine: line)
     }
 
-    /// If the newest line is from the app and contains a question, returns that question sentence.
+    /// If the newest line is from the app and ends with a real question, returns that question sentence.
     static func pendingQuestion(in digest: WindowLiveDigest) -> String? {
-        guard let last = digest.lines.last, last.isIncomingOrAgent, last.text.contains("?") else { return nil }
+        guard let last = digest.lines.last,
+              last.isIncomingOrAgent,
+              last.text.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?") else { return nil }
         let sentences = splitSentences(last.text)
-        let q: String = sentences.last(where: { $0.contains("?") }) ?? last.text
+        guard let q = sentences.last(where: { $0.hasSuffix("?") }), q.count >= 12 else { return nil }
         return clip(q, 150)
     }
 
@@ -945,9 +947,16 @@ struct RaceRightNowColumn: View {
     let info: RaceAppInfo
     let m: RaceMetrics
 
-    private var primaryLine: DigestFeedLine? {
-        let lines = info.digest.lines
-        return lines.last(where: { $0.isIncomingOrAgent && $0.text.count >= 6 }) ?? lines.last
+    private var primaryAgentLines: [DigestFeedLine] {
+        let agentLines = info.digest.lines.filter { $0.isIncomingOrAgent && $0.text.count >= 6 }
+        guard let last = agentLines.last else {
+            if let fallback = info.digest.lines.last { return [fallback] }
+            return []
+        }
+        if last.text.count >= 160 || agentLines.count == 1 {
+            return [last]
+        }
+        return Array(agentLines.suffix(3))
     }
 
     private var latestUserPrompt: DigestFeedLine? {
@@ -956,19 +965,20 @@ struct RaceRightNowColumn: View {
 
     private var rightNowText: String {
         let appName = info.window.appName
-        guard let latest = primaryLine else {
+        let selected = primaryAgentLines
+        guard !selected.isEmpty else {
             return "\(appName) is open and ready."
         }
-        let cleaned = latest.text.replacingOccurrences(of: " • ", with: "\n• ")
-        return RaceAppInfo.clip(cleaned, 540)
+        let combined = selected.map { $0.text.replacingOccurrences(of: " • ", with: "\n• ") }.joined(separator: "\n\n")
+        return RaceAppInfo.clip(combined, 560)
     }
 
     var body: some View {
         let lines: [DigestFeedLine] = info.digest.lines
-        let primaryID: String? = primaryLine?.id
+        let primaryIDs: Set<String> = Set(primaryAgentLines.map { $0.id })
         let promptID: String? = latestUserPrompt?.id
         let earlier: [DigestFeedLine] = Array(
-            lines.filter { $0.id != primaryID && $0.id != promptID }.suffix(m.isBar ? 3 : 5)
+            lines.filter { !primaryIDs.contains($0.id) && $0.id != promptID }.suffix(m.isBar ? 3 : 5)
         )
         let cardShape = RoundedRectangle(cornerRadius: m.s(18))
 
@@ -977,7 +987,7 @@ struct RaceRightNowColumn: View {
                 RaceRadioQuestion(viewModel: viewModel, info: info, question: q, m: m)
             }
 
-            if let prompt = latestUserPrompt, prompt.id != primaryID {
+            if let prompt = latestUserPrompt, !primaryIDs.contains(prompt.id) {
                 HStack(alignment: .top, spacing: m.s(10)) {
                     Text("🗣️ YOU:")
                         .font(RaceType.font(m.t(19), .heavy))
