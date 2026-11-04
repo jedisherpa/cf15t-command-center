@@ -686,26 +686,47 @@ struct RaceFocusHeader: View {
     let m: RaceMetrics
 
     var body: some View {
-        let whereLabel: String = viewModel.operatingMode == .fullControl ? "IN CONTROL NOW" : "ON THE LAPTOP SCREEN NOW"
+        let whereLabel: String = viewModel.isZoomRunningOnLaptop
+            ? "🎥 ZOOM STAYS ON LAPTOP · CONTROLLING HERE"
+            : "CONTROLLING IN BACKGROUND · LAPTOP UNTOUCHED"
         let iconSize: CGFloat = m.isBar ? m.s(70) : m.s(88)
 
-        HStack(spacing: m.s(20)) {
+        HStack(spacing: m.s(18)) {
             RaceAppIcon(window: info.window, size: iconSize, ring: RacePalette.yellow, ringWidth: m.s(4))
                 .padding(m.s(4))
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(whereLabel)
-                    .font(RaceType.font(m.s(22), .heavy))
+                    .font(RaceType.font(m.s(20), .heavy))
                     .foregroundColor(RacePalette.yellow)
-                    .tracking(m.s(2))
+                    .tracking(m.s(1.5))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 Text(info.window.appName.uppercased())
-                    .font(RaceType.font(m.isBar ? m.s(54) : m.s(66), .black))
+                    .font(RaceType.font(m.isBar ? m.s(52) : m.s(62), .black))
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
             }
 
-            Spacer(minLength: m.s(10))
+            Spacer(minLength: m.s(8))
+
+            Button(action: { viewModel.bringWindowToLaptopScreen(info.window) }) {
+                VStack(spacing: m.s(2)) {
+                    Text("📺 ON LAPTOP")
+                        .font(RaceType.font(m.s(20), .black, italic: false))
+                    Text("Bring to main screen")
+                        .font(RaceType.font(m.s(14), .semibold, italic: false))
+                        .opacity(0.8)
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, m.s(16))
+                .padding(.vertical, m.s(10))
+                .background(RoundedRectangle(cornerRadius: m.s(14)).fill(RacePalette.rowBg))
+                .overlay(RoundedRectangle(cornerRadius: m.s(14)).stroke(RacePalette.edge, lineWidth: m.s(2)))
+                .contentShape(RoundedRectangle(cornerRadius: m.s(14)))
+            }
+            .buttonStyle(RacePressButtonStyle())
 
             RaceStatusLCD(viewModel: viewModel, info: info, m: m)
         }
@@ -1313,7 +1334,7 @@ struct RaceTimingTower: View {
                     }
                     .buttonStyle(RacePressButtonStyle())
                 } else {
-                    Text("tap one to put it on the big screen")
+                    Text("tap to control here · keeps Zoom on laptop")
                         .font(RaceType.font(m.s(17), .semibold, italic: false))
                         .opacity(0.9)
                         .lineLimit(1)

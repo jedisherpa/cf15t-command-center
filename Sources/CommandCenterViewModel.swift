@@ -175,10 +175,34 @@ final class CommandCenterViewModel: ObservableObject {
         startPeriodicRefresh()
     }
 
+    private func isZoomPID(_ pid: pid_t) -> Bool {
+        guard let app = NSRunningApplication(processIdentifier: pid) else { return false }
+        let bid = (app.bundleIdentifier ?? "").lowercased()
+        let name = (app.localizedName ?? "").lowercased()
+        return bid.contains("us.zoom") || name.contains("zoom")
+    }
+
+    func isZoomWindow(_ window: MonitoredWindow) -> Bool {
+        let bid = (window.bundleIdentifier ?? "").lowercased()
+        let name = window.appName.lowercased()
+        return bid.contains("us.zoom") || name == "zoom" || name.hasPrefix("zoom ")
+    }
+
+    var isZoomRunningOnLaptop: Bool {
+        openWindows.contains(where: { isZoomWindow($0) }) ||
+        NSWorkspace.shared.runningApplications.contains(where: { ($0.bundleIdentifier ?? "").lowercased().contains("us.zoom") })
+    }
+
     private func handleExternalAppActivated(pid: pid_t) {
+        // When the user clicks into Zoom on the main screen, keep the CF15T Command Center
+        // focused on the background app they are controlling rather than switching to Zoom.
+        guard !isZoomPID(pid) else {
+            statusBannerMessage = "🎥 Zoom active on main screen — CF15T controlling \(currentStageWindow?.appName ?? "other apps") in background"
+            return
+        }
         lastExternalFrontmostPID = pid
-        userPinnedWindowUntil = 0
-        if let existingMatch = openWindows.first(where: { $0.ownerPID == pid && $0.id != 999_999 }) {
+        if Date().timeIntervalSinceReferenceDate >= userPinnedWindowUntil,
+           let existingMatch = openWindows.first(where: { $0.ownerPID == pid && $0.id != 999_999 && !isZoomWindow($0) }) {
             ensureWindowIsDisplayed(existingMatch)
             lastFrontmostOnScreenWindowID = existingMatch.id
             withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
@@ -254,6 +278,10 @@ final class CommandCenterViewModel: ObservableObject {
 
     func isProgramDisplayed(_ appName: String) -> Bool {
         let key = normalizedAppKey(appName)
+        // Keep Zoom on the main laptop screen rather than putting Zoom into the CF15T app switcher by default
+        if key == "zoom" || key.hasPrefix("zoom ") {
+            return programSelectionMode == .customDefaults && customAllowedApps.contains(key)
+        }
         switch programSelectionMode {
         case .automatic:
             return !hiddenAppNamesInAutoMode.contains(key)
@@ -424,20 +452,27 @@ final class CommandCenterViewModel: ObservableObject {
                 self.agentSnapshots = scanResult.agents
                 self.runningTasks = scanResult.tasks
 
-                // Follow whichever app/window is currently frontmost on the laptop whenever it genuinely changes
-                let effectiveFrontPID: pid_t? = externalFrontPID ?? self.lastExternalFrontmostPID
+                // Follow whichever non-Zoom app/window is currently frontmost on the laptop whenever it genuinely changes
+                let nonZoomExternalFrontPID: pid_t? = {
+                    guard let pid = externalFrontPID, !self.isZoomPID(pid) else { return nil }
+                    return pid
+                }()
+                let effectiveFrontPID: pid_t? = nonZoomExternalFrontPID ?? self.lastExternalFrontmostPID
                 let topmostLaptopWindow: MonitoredWindow? = {
                     if let extPID = effectiveFrontPID,
-                       let match = fetchedWindows.first(where: { $0.ownerPID == extPID && $0.id != 999_999 }) {
+                       let match = fetchedWindows.first(where: { $0.ownerPID == extPID && $0.id != 999_999 && !self.isZoomWindow($0) }) {
                         return match
                     }
-                    return fetchedWindows.first(where: { $0.id != 999_999 && $0.appName.lowercased() != "system settings" })
-                        ?? fetchedWindows.first(where: { $0.id != 999_999 })
+                    return fetchedWindows.first(where: {
+                        $0.id != 999_999 &&
+                        !self.isZoomWindow($0) &&
+                        $0.appName.lowercased() != "system settings"
+                    }) ?? fetchedWindows.first(where: { $0.id != 999_999 && !self.isZoomWindow($0) })
                 }()
 
                 let now = Date().timeIntervalSinceReferenceDate
-                if let extPID = externalFrontPID,
-                   let activeWin = fetchedWindows.first(where: { $0.ownerPID == extPID && $0.id != 999_999 }) {
+                if let extPID = nonZoomExternalFrontPID,
+                   let activeWin = fetchedWindows.first(where: { $0.ownerPID == extPID && $0.id != 999_999 && !self.isZoomWindow($0) }) {
                     let frontWindowChanged = (activeWin.id != self.lastFrontmostOnScreenWindowID)
                     let frontAppChanged = (extPID != self.lastExternalFrontmostPID)
                     self.lastFrontmostOnScreenWindowID = activeWin.id
@@ -500,28 +535,7 @@ final class CommandCenterViewModel: ObservableObject {
                 alwaysOnTop: false
             )
 
-            if isUserInitiatedSwitch {
-                // Move open programs back onto the Main MacBook Screen!
-                if orchestrateTapAction == .tileAllOnMain, let stage = currentStageWindow {
-                    let borders = visibleTiledWindows.filter { $0.id != stage.id }
-                    WindowTilingEngine.shared.tileWindowsOnScreen(
-                        stageWindow: stage,
-                        borderWindows: borders,
-                        mode: tilingMode,
-                        targetDisplay: .primaryDisplay,
-                        stageScale: CGFloat(stageScaleFactor),
-                        topDockReserveHeight: 0
-                    )
-                } else if let stage = currentStageWindow {
-                    WindowTilingEngine.shared.focusAndFillSingleWindow(
-                        stage,
-                        targetDisplay: .primaryDisplay,
-                        topDockReserveHeight: 0,
-                        fillDisplay: autoTileRealWindowsOnTap
-                    )
-                }
-            }
-            statusBannerMessage = "ORCHESTRATE MODE — Tap any tile on CF15T to switch/tile programs on your Main MacBook Screen"
+            statusBannerMessage = "ORCHESTRATE MODE — Control apps in the background here while your main laptop screen stays untouched"
 
         case .fullControl:
             keepAwakeEnabled = true
@@ -719,7 +733,8 @@ final class CommandCenterViewModel: ObservableObject {
 
     func promoteWindowToStage(_ window: MonitoredWindow) {
         ensureWindowIsDisplayed(window)
-        userPinnedWindowUntil = Date().timeIntervalSinceReferenceDate + 15.0
+        // Pin the user's selected app on the CF15T Command Center so clicking in Zoom on the laptop never resets it
+        userPinnedWindowUntil = Date().timeIntervalSinceReferenceDate + 3600.0
 
         withAnimation(.spring(response: 0.24, dampingFraction: 0.85)) {
             stageWindowID = window.id
@@ -742,33 +757,23 @@ final class CommandCenterViewModel: ObservableObject {
             }
         }
 
-        if operatingMode == .fullControl {
-            // Focus the window on the laptop while keeping Command Center Always-On-Top on the CF15T screen
-            WindowTilingEngine.shared.focusWindow(window)
-            _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(
-                dockedTopBar: isFullControlDocked,
-                dockHeight: currentDockReserveHeight,
-                alwaysOnTop: true
-            )
-            statusBannerMessage = "FULL CONTROL: \(window.appName) is now #1 Center Stage"
-            return
-        }
+        // Keep the main laptop screen (e.g. Zoom Meeting) completely undisturbed!
+        // The selected app is now in the CF15T Spotlight and all steering-wheel buttons control it in the background.
+        statusBannerMessage = "Controlling \(window.appName) here — Main laptop screen stays untouched"
+    }
 
-        // In ORCHESTRATE mode, switch/focus or tile on the Main MacBook Screen
-        if orchestrateTapAction == .focusSingleAppOnMain {
-            WindowTilingEngine.shared.focusAndFillSingleWindow(
-                window,
-                targetDisplay: targetDisplayMode,
-                topDockReserveHeight: 0,
-                fillDisplay: autoTileRealWindowsOnTap
-            )
-            statusBannerMessage = "Switched Laptop Screen to \(window.appName)"
-        } else if autoTileRealWindowsOnTap && WindowTilingEngine.shared.isAccessibilityTrusted(promptIfNeeded: false) {
-            applyRealScreenTilingNow(stageWindow: window, promptIfUntrusted: false)
-        } else {
-            WindowTilingEngine.shared.focusWindow(window)
-            statusBannerMessage = "Switched to \(window.appName)"
-        }
+    /// Explicitly brings a window onto the main laptop screen only when the user taps '📺 ON LAPTOP'.
+    func bringWindowToLaptopScreen(_ window: MonitoredWindow) {
+        ensureWindowIsDisplayed(window)
+        userPinnedWindowUntil = Date().timeIntervalSinceReferenceDate + 3600.0
+        stageWindowID = window.id
+        WindowTilingEngine.shared.focusAndFillSingleWindow(
+            window,
+            targetDisplay: .primaryDisplay,
+            topDockReserveHeight: 0,
+            fillDisplay: autoTileRealWindowsOnTap
+        )
+        statusBannerMessage = "📺 Brought \(window.appName) onto the main laptop screen"
     }
 
     // MARK: - Universal Per-Tile Voice Dictation & Instruction Actions (For Every App)

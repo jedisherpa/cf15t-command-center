@@ -295,65 +295,60 @@ final class UniversalVoiceDictationEngine: ObservableObject {
         recognitionTask = nil
     }
 
-    // MARK: - Flow Dictated Text Directly Into Target App's Open Prompt Window
+    // MARK: - Flow Dictated Text Directly Into Target App's Open Prompt Window (Background-Safe: Never Leaves Zoom)
 
     func deliverInstructionToWindow(_ text: String, window: MonitoredWindow, pressReturn: Bool) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        let commandCenterWindow = SiSTouchHardwareDriver.shared.targetCommandCenterWindow ?? NSApp.windows.first(where: { $0.isVisible })
-        let wasFloating = (commandCenterWindow?.level == .floating)
+        let targetPID = resolveTargetPID(for: window)
 
-        if wasFloating {
-            commandCenterWindow?.level = .floating
-        }
-
-        // 1. Copy the Whisper-transcribed text to NSPasteboard so ⌘V pastes the entire instruction cleanly
+        // 1. Copy text to NSPasteboard as a convenience backup
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(trimmed, forType: .string)
 
-        // 2. Focus the target application and its open prompt/input field
-        activateTargetAppForInput(window: window)
+        // 2. Focus the editable prompt field inside the target window via Accessibility WITHOUT activating
+        //    the app or raising its window, so Zoom (or any frontmost app on the laptop) stays untouched.
+        _ = focusEditableTextElementInBackground(pid: targetPID, windowTitle: window.windowTitle)
 
-        // 3. Flow text in via ⌘V and optionally press Return (⏎)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+        // 3. Stream the text and optional Return key directly to targetPID's event queue in the background
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
             let src = CGEventSource(stateID: .hidSystemState)
-            // Send ⌘V (keyCode 9 = 'v')
-            if let vDown = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true),
-               let vUp = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false) {
-                vDown.flags = .maskCommand
-                vUp.flags = .maskCommand
-                vDown.post(tap: .cghidEventTap)
-                vUp.post(tap: .cghidEventTap)
+            let utf16Units = Array(trimmed.utf16)
+            let chunkSize = 18
+            var offset = 0
+            while offset < utf16Units.count {
+                let end = min(offset + chunkSize, utf16Units.count)
+                var slice = Array(utf16Units[offset..<end])
+                if let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
+                   let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) {
+                    down.keyboardSetUnicodeString(stringLength: slice.count, unicodeString: &slice)
+                    up.keyboardSetUnicodeString(stringLength: slice.count, unicodeString: &slice)
+                    down.postToPid(targetPID)
+                    up.postToPid(targetPID)
+                }
+                offset = end
             }
 
             if pressReturn {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
                     if let retDown = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: true),
                        let retUp = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: false) {
                         retDown.flags = []
                         retUp.flags = []
-                        retDown.post(tap: .cghidEventTap)
-                        retUp.post(tap: .cghidEventTap)
+                        retDown.postToPid(targetPID)
+                        retUp.postToPid(targetPID)
                     }
+                    self.onDictationSent?(window, trimmed)
                 }
-            }
-
-            // 4. Keep Command Center visible on top in Full Control mode
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
-                if wasFloating, let ccWin = commandCenterWindow {
-                    ccWin.level = .floating
-                    ccWin.orderFrontRegardless()
-                }
+            } else {
                 self.onDictationSent?(window, trimmed)
             }
         }
     }
 
-    private func activateTargetAppForInput(window: MonitoredWindow) {
-        var targetPID = window.ownerPID
-
+    private func resolveTargetPID(for window: MonitoredWindow) -> pid_t {
         if window.id == 999_999 {
             let hostKeywords = ["antigravity", "cursor", "code", "windsurf"]
             if let hostApp = NSWorkspace.shared.runningApplications.first(where: { app in
@@ -361,25 +356,38 @@ final class UniversalVoiceDictationEngine: ObservableObject {
                 let bundle = (app.bundleIdentifier ?? "").lowercased()
                 return hostKeywords.contains(where: { name.contains($0) || bundle.contains($0) })
             }) {
-                targetPID = hostApp.processIdentifier
+                return hostApp.processIdentifier
             }
         }
+        return window.ownerPID
+    }
 
-        if let app = NSRunningApplication(processIdentifier: targetPID) {
-            NSApp.yieldActivation(to: app)
-            app.unhide()
-            app.activate(options: [.activateAllWindows])
-        }
-
-        let axApp = AXUIElementCreateApplication(targetPID)
+    @discardableResult
+    private func focusEditableTextElementInBackground(pid: pid_t, windowTitle: String) -> Bool {
+        let axApp = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(axApp, 0.08)
         var windowsRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-           let axWindows = windowsRef as? [AXUIElement],
-           let firstWin = axWindows.first {
-            AXUIElementSetAttributeValue(firstWin, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-            AXUIElementPerformAction(firstWin, kAXRaiseAction as CFString)
-            focusEditableTextElement(in: firstWin, depth: 0)
+        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let axWindows = windowsRef as? [AXUIElement],
+              !axWindows.isEmpty else {
+            return false
         }
+
+        let targetWin: AXUIElement = {
+            if !windowTitle.isEmpty {
+                for w in axWindows {
+                    var tRef: CFTypeRef?
+                    if AXUIElementCopyAttributeValue(w, kAXTitleAttribute as CFString, &tRef) == .success,
+                       let t = tRef as? String,
+                       (t == windowTitle || t.localizedCaseInsensitiveContains(windowTitle)) {
+                        return w
+                    }
+                }
+            }
+            return axWindows[0]
+        }()
+
+        return focusEditableTextElement(in: targetWin, depth: 0)
     }
 
     @discardableResult

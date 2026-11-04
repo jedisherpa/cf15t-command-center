@@ -262,18 +262,15 @@ final class WindowTilingEngine {
         flags: CGEventFlags = [],
         targetWindow: MonitoredWindow?
     ) {
-        if let win = targetWindow, win.id != 999_999 {
-            focusWindow(win)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            let src = CGEventSource(stateID: .hidSystemState)
-            if let down = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: true),
-               let up = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: false) {
-                down.flags = flags
-                up.flags = flags
-                down.post(tap: .cghidEventTap)
-                up.post(tap: .cghidEventTap)
-            }
+        guard let win = targetWindow else { return }
+        let targetPID = win.ownerPID
+        let src = CGEventSource(stateID: .hidSystemState)
+        if let down = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: true),
+           let up = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: false) {
+            down.flags = flags
+            up.flags = flags
+            down.postToPid(targetPID)
+            up.postToPid(targetPID)
         }
     }
 
@@ -282,49 +279,49 @@ final class WindowTilingEngine {
         pressReturn: Bool,
         targetWindow: MonitoredWindow?
     ) {
-        guard !text.isEmpty || pressReturn else { return }
-        if let win = targetWindow, win.id != 999_999 {
-            focusWindow(win)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            let src = CGEventSource(stateID: .hidSystemState)
-            if !text.isEmpty {
-                let utf16Chars = Array(text.utf16)
+        guard !text.isEmpty || pressReturn, let win = targetWindow else { return }
+        let targetPID = win.ownerPID
+        let src = CGEventSource(stateID: .hidSystemState)
+        if !text.isEmpty {
+            let utf16Chars = Array(text.utf16)
+            let chunkSize = 18
+            var offset = 0
+            while offset < utf16Chars.count {
+                let end = min(offset + chunkSize, utf16Chars.count)
+                var slice = Array(utf16Chars[offset..<end])
                 if let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
                    let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) {
-                    down.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
-                    up.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
-                    down.post(tap: .cghidEventTap)
-                    up.post(tap: .cghidEventTap)
+                    down.keyboardSetUnicodeString(stringLength: slice.count, unicodeString: &slice)
+                    up.keyboardSetUnicodeString(stringLength: slice.count, unicodeString: &slice)
+                    down.postToPid(targetPID)
+                    up.postToPid(targetPID)
                 }
+                offset = end
             }
-            if pressReturn {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    if let retDown = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: true),
-                       let retUp = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: false) {
-                        retDown.post(tap: .cghidEventTap)
-                        retUp.post(tap: .cghidEventTap)
-                    }
+        }
+        if pressReturn {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
+                if let retDown = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: true),
+                   let retUp = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: false) {
+                    retDown.postToPid(targetPID)
+                    retUp.postToPid(targetPID)
                 }
             }
         }
     }
 
     func sendScrollToTargetWindow(deltaY: Int32, targetWindow: MonitoredWindow?) {
-        if let win = targetWindow, win.id != 999_999 {
-            let targetPt = CGPoint(x: win.bounds.midX, y: win.bounds.midY)
-            CGWarpMouseCursorPosition(targetPt)
-            CGAssociateMouseAndMouseCursorPosition(1)
-        }
+        guard let win = targetWindow else { return }
         if let scrollEv = CGEvent(
             scrollWheelEvent2Source: nil,
             units: .pixel,
             wheelCount: 1,
-            wheel1: deltaY,
+            wheel1: deltaY * 14,
             wheel2: 0,
             wheel3: 0
         ) {
-            scrollEv.post(tap: .cghidEventTap)
+            scrollEv.location = CGPoint(x: win.bounds.midX, y: win.bounds.midY)
+            scrollEv.postToPid(win.ownerPID)
         }
     }
 
