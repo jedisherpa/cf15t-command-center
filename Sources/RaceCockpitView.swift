@@ -255,9 +255,11 @@ struct RaceCockpitView: View {
     var body: some View {
         GeometryReader { geo in
             let m = RaceMetrics(size: geo.size, fontScale: viewModel.feedFontScale)
-            let stage: MonitoredWindow? = stageWindow
+            let stageWindows: [MonitoredWindow] = viewModel.currentStageWindows(from: shownWindows)
+            let stage: MonitoredWindow? = stageWindows.first ?? stageWindow
             let info: RaceAppInfo? = stage.map { RaceAppInfo.make($0, viewModel: viewModel) }
-            let others: [MonitoredWindow] = shownWindows.filter { $0.id != stage?.id }
+            let stageIDs: Set<CGWindowID> = Set(stageWindows.map { $0.id })
+            let others: [MonitoredWindow] = shownWindows.filter { !stageIDs.contains($0.id) }
             let dictating: MonitoredWindow? = viewModel.openWindows.first(where: { viewModel.isDictating(for: $0) })
 
             ZStack {
@@ -270,12 +272,29 @@ struct RaceCockpitView: View {
 
                     RaceTopBar(viewModel: viewModel, info: info, m: m)
 
-                    HStack(spacing: m.s(18)) {
-                        RaceFocusPanel(viewModel: viewModel, info: info, m: m)
-                        RaceTimingTower(viewModel: viewModel, others: others, m: m)
-                            .frame(width: m.towerWidth)
+                    if viewModel.visibleStageWindowCount <= 1 || stageWindows.count <= 1 {
+                        HStack(spacing: m.s(18)) {
+                            RaceFocusPanel(viewModel: viewModel, info: info, m: m)
+                            RaceTimingTower(viewModel: viewModel, others: others, m: m)
+                                .frame(width: m.towerWidth)
+                        }
+                        .frame(maxHeight: .infinity)
+                    } else {
+                        HStack(spacing: m.s(12)) {
+                            ForEach(Array(stageWindows.enumerated()), id: \.element.id) { idx, win in
+                                RaceSideBySidePod(
+                                    viewModel: viewModel,
+                                    info: RaceAppInfo.make(win, viewModel: viewModel),
+                                    slotIndex: idx,
+                                    totalSlots: stageWindows.count,
+                                    m: m
+                                )
+                            }
+                            RaceTimingTower(viewModel: viewModel, others: others, m: m)
+                                .frame(width: stageWindows.count >= 3 ? m.s(300) : m.s(360))
+                        }
+                        .frame(maxHeight: .infinity)
                     }
-                    .frame(maxHeight: .infinity)
                 }
                 .padding(.horizontal, m.s(24))
                 .padding(.vertical, m.s(14))
@@ -407,10 +426,14 @@ struct RaceTopBar: View {
 
             RaceModeKnob(viewModel: viewModel, m: m)
 
+            Spacer(minLength: m.s(4))
+
+            RaceWindowCountSelector(viewModel: viewModel, m: m)
+
             if m.isBar {
                 RaceShiftLightStrip(viewModel: viewModel, info: info, m: m, inline: true)
             } else {
-                Spacer(minLength: 0)
+                Spacer(minLength: m.s(4))
             }
 
             if multipleScreens {
@@ -444,6 +467,294 @@ struct RaceTopBar: View {
             .buttonStyle(RacePressButtonStyle())
         }
         .frame(height: m.topBarHeight)
+    }
+}
+
+struct RaceWindowCountSelector: View {
+    @ObservedObject var viewModel: CommandCenterViewModel
+    let m: RaceMetrics
+
+    private func symbolFor(_ n: Int) -> String {
+        switch n {
+        case 1: return "rectangle.fill"
+        case 2: return "rectangle.split.2x1.fill"
+        default: return "rectangle.split.3x1.fill"
+        }
+    }
+
+    var body: some View {
+        let activeCount: Int = viewModel.visibleStageWindowCount
+
+        HStack(spacing: m.s(10)) {
+            if !m.isBar {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("WINDOWS")
+                        .font(RaceType.font(m.s(20), .heavy))
+                        .foregroundColor(RacePalette.yellow)
+                    Text("Side by side")
+                        .font(RaceType.font(m.s(14), .semibold, italic: false))
+                        .foregroundColor(RacePalette.muted)
+                }
+                .padding(.leading, m.s(6))
+            }
+
+            ForEach([1, 2, 3], id: \.self) { count in
+                let isSelected: Bool = (activeCount == count)
+                Button(action: {
+                    viewModel.setVisibleStageWindowCount(count)
+                }) {
+                    HStack(spacing: m.s(6)) {
+                        Image(systemName: symbolFor(count))
+                            .font(.system(size: m.s(20), weight: .black))
+                        Text("\(count)")
+                            .font(RaceType.font(m.s(28), .black, italic: false))
+                    }
+                    .foregroundColor(isSelected ? .black : .white)
+                    .padding(.horizontal, m.s(18))
+                    .frame(height: m.isBar ? m.s(56) : m.s(66))
+                    .background(
+                        Capsule().fill(isSelected ? RacePalette.yellow : RacePalette.rowBg)
+                    )
+                    .overlay(
+                        Capsule().stroke(isSelected ? RacePalette.yellow : RacePalette.edge, lineWidth: m.s(2.5))
+                    )
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(RacePressButtonStyle())
+            }
+        }
+        .padding(.horizontal, m.s(14))
+        .frame(height: m.isBar ? m.s(72) : m.s(86))
+        .background(RaceCarbon().clipShape(Capsule()))
+        .overlay(Capsule().stroke(RacePalette.edge, lineWidth: m.s(2)))
+    }
+}
+
+struct RaceSideBySidePod: View {
+    @ObservedObject var viewModel: CommandCenterViewModel
+    @ObservedObject var speechEngine = SensoryFriendlySpeechEngine.shared
+    let info: RaceAppInfo
+    let slotIndex: Int
+    let totalSlots: Int
+    let m: RaceMetrics
+
+    @State private var showWholeWindow: Bool = false
+    @State private var isLiveFullHeight: Bool = false
+
+    private var primaryText: String {
+        let agentLines = info.digest.lines.filter { $0.isIncomingOrAgent && $0.text.count >= 6 }
+        if let last = agentLines.last {
+            if last.text.count >= 140 || agentLines.count == 1 {
+                return RaceAppInfo.clip(last.text, 340)
+            }
+            let combined = agentLines.suffix(2).map { $0.text }.joined(separator: "\n")
+            return RaceAppInfo.clip(combined, 340)
+        }
+        if let anyLast = info.digest.lines.last {
+            return RaceAppInfo.clip(anyLast.text, 340)
+        }
+        return "\(info.window.appName) is open and ready."
+    }
+
+    private func shortLabel(_ card: AACVisualSymbolCard) -> String {
+        switch card.id {
+        case "ai_yes": return "DO IT"
+        case "ai_explain": return "EXPLAIN"
+        case "ai_fix": return "FIX IT"
+        case "ai_steps": return "NEXT"
+        case "ai_stop": return "STOP"
+        case "msg_yes": return "YES"
+        case "msg_no": return "NO"
+        default: return card.shortTitle
+        }
+    }
+
+    var body: some View {
+        let win = info.window
+        let isFocusedSlot: Bool = (viewModel.activeMultiSlotIndex == slotIndex)
+        let shape = RoundedRectangle(cornerRadius: m.s(24))
+        let cards = AACVisualSymbolCard.cards(for: win)
+        let redIDs: Set<String> = ["ai_stop", "msg_no", "nav_back"]
+        let redCard = cards.first(where: { redIDs.contains($0.id) })
+        let actionCards = Array(cards.filter { $0.id != redCard?.id }.prefix(totalSlots >= 3 ? 2 : 3))
+        let isRec = viewModel.isDictating(for: win)
+        let isReading = speechEngine.isSpeaking && speechEngine.speakingWindowID == win.id
+
+        VStack(spacing: m.s(10)) {
+            // Pod Header
+            HStack(spacing: m.s(10)) {
+                Button(action: {
+                    viewModel.activeMultiSlotIndex = slotIndex
+                    viewModel.statusBannerMessage = "Slot \(slotIndex + 1) (\(win.appName)) selected — tap any app in OTHER APPS to swap here"
+                }) {
+                    HStack(spacing: m.s(8)) {
+                        Text("\(slotIndex + 1)")
+                            .font(RaceType.font(m.s(22), .black, italic: false))
+                            .foregroundColor(isFocusedSlot ? .black : .white)
+                            .frame(width: m.s(34), height: m.s(34))
+                            .background(Circle().fill(isFocusedSlot ? RacePalette.yellow : RacePalette.rowBg))
+                            .overlay(Circle().stroke(RacePalette.yellow, lineWidth: m.s(2)))
+
+                        RaceAppIcon(window: win, size: m.s(50), ring: isFocusedSlot ? RacePalette.yellow : RacePalette.edge, ringWidth: m.s(2.5))
+
+                        VStack(alignment: .leading, spacing: m.s(2)) {
+                            Text(win.appName.uppercased())
+                                .font(RaceType.font(totalSlots >= 3 ? m.s(28) : m.s(34), .black))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                            RaceStatusPill(status: info.status, fontSize: m.s(15))
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(RacePressButtonStyle())
+
+                Spacer(minLength: m.s(4))
+
+                Button(action: {
+                    withAnimation(.spring(response: 0.22, dampingFraction: 0.85)) {
+                        isLiveFullHeight.toggle()
+                    }
+                }) {
+                    Text(isLiveFullHeight ? "📖 TEXT" : "🔍 FULL")
+                        .font(RaceType.font(m.s(16), .black, italic: false))
+                        .foregroundColor(isLiveFullHeight ? .black : RacePalette.yellow)
+                        .padding(.horizontal, m.s(10))
+                        .padding(.vertical, m.s(8))
+                        .background(RoundedRectangle(cornerRadius: m.s(10)).fill(isLiveFullHeight ? RacePalette.yellow : RacePalette.rowBg))
+                        .overlay(RoundedRectangle(cornerRadius: m.s(10)).stroke(RacePalette.yellow, lineWidth: m.s(1.5)))
+                        .contentShape(RoundedRectangle(cornerRadius: m.s(10)))
+                }
+                .buttonStyle(RacePressButtonStyle())
+
+                Button(action: { viewModel.bringWindowToLaptopScreen(win) }) {
+                    Text("📺")
+                        .font(.system(size: m.s(20)))
+                        .padding(.horizontal, m.s(10))
+                        .padding(.vertical, m.s(7))
+                        .background(RoundedRectangle(cornerRadius: m.s(10)).fill(RacePalette.rowBg))
+                        .overlay(RoundedRectangle(cornerRadius: m.s(10)).stroke(RacePalette.edge, lineWidth: m.s(1.5)))
+                        .contentShape(RoundedRectangle(cornerRadius: m.s(10)))
+                }
+                .buttonStyle(RacePressButtonStyle())
+            }
+
+            // Live Screen (expands to fill available space)
+            RaceLiveScreen(
+                info: info,
+                m: m,
+                showWholeWindow: $showWholeWindow,
+                isLiveWindowFullWidth: $isLiveFullHeight
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Live Window Text card (shown unless toggled to full-height live image)
+            if !isLiveFullHeight {
+                VStack(alignment: .leading, spacing: m.s(4)) {
+                    Text("💬 \(win.appName.uppercased()) · LIVE WINDOW TEXT")
+                        .font(RaceType.font(m.s(16), .heavy))
+                        .foregroundColor(RacePalette.yellow)
+                        .lineLimit(1)
+                    Text(primaryText)
+                        .font(RaceType.font(totalSlots >= 3 ? m.t(19) : m.t(21), .bold, italic: false))
+                        .foregroundColor(.white)
+                        .lineLimit(totalSlots >= 3 ? 5 : 6)
+                        .minimumScaleFactor(0.70)
+                        .fixedSize(horizontal: false, vertical: false)
+                }
+                .padding(.horizontal, m.s(14))
+                .padding(.vertical, m.s(10))
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(height: m.isBar ? m.s(120) : m.s(165), alignment: .topLeading)
+                .background(RoundedRectangle(cornerRadius: m.s(14)).fill(Color(red: 0.06, green: 0.08, blue: 0.07)))
+                .overlay(RoundedRectangle(cornerRadius: m.s(14)).stroke(RacePalette.green.opacity(0.55), lineWidth: m.s(2)))
+            }
+
+            // Compact Pod Action Deck (TALK · READ · ACTIONS · STOP)
+            HStack(spacing: m.s(8)) {
+                Button(action: { viewModel.toggleVoiceDictation(for: win) }) {
+                    HStack(spacing: m.s(4)) {
+                        Text(isRec ? "📤" : "🎤")
+                            .font(.system(size: m.s(22)))
+                        Text(isRec ? "SEND" : "TALK")
+                            .font(RaceType.font(m.s(18), .black, italic: false))
+                    }
+                    .foregroundColor(isRec ? .white : Color(red: 0.01, green: 0.17, blue: 0.07))
+                    .padding(.horizontal, m.s(12))
+                    .frame(height: m.s(58))
+                    .background(Capsule().fill(isRec ? RacePalette.red : RacePalette.green))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(RacePressButtonStyle())
+
+                Button(action: {
+                    speechEngine.toggleReadAloud(for: win)
+                    viewModel.statusBannerMessage = speechEngine.isSpeaking
+                        ? "🔊 Reading \(win.appName) aloud"
+                        : "⏹️ Stopped reading \(win.appName)"
+                }) {
+                    VStack(spacing: m.s(2)) {
+                        Text(isReading ? "⏹️" : "🔊")
+                            .font(.system(size: m.s(20)))
+                        Text("READ")
+                            .font(RaceType.font(m.s(14), .heavy))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: m.s(58))
+                    .background(RoundedRectangle(cornerRadius: m.s(12)).fill(RacePalette.blue.opacity(0.85)))
+                    .contentShape(RoundedRectangle(cornerRadius: m.s(12)))
+                }
+                .buttonStyle(RacePressButtonStyle())
+
+                ForEach(actionCards) { card in
+                    Button(action: { viewModel.executeAACSymbolCard(card, for: win) }) {
+                        VStack(spacing: m.s(2)) {
+                            Text(card.emoji)
+                                .font(.system(size: m.s(20)))
+                            Text(shortLabel(card))
+                                .font(RaceType.font(m.s(14), .heavy))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.65)
+                        }
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: m.s(58))
+                        .background(RoundedRectangle(cornerRadius: m.s(12)).fill(card.backgroundColor))
+                        .contentShape(RoundedRectangle(cornerRadius: m.s(12)))
+                    }
+                    .buttonStyle(RacePressButtonStyle())
+                }
+
+                if let red = redCard {
+                    Button(action: { viewModel.executeAACSymbolCard(red, for: win) }) {
+                        VStack(spacing: m.s(2)) {
+                            Text(red.emoji)
+                                .font(.system(size: m.s(20)))
+                            Text(shortLabel(red))
+                                .font(RaceType.font(m.s(14), .black))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, m.s(10))
+                        .frame(height: m.s(58))
+                        .background(RoundedRectangle(cornerRadius: m.s(12)).fill(RacePalette.red))
+                        .overlay(RoundedRectangle(cornerRadius: m.s(12)).stroke(RacePalette.yellow, lineWidth: m.s(2)))
+                        .contentShape(RoundedRectangle(cornerRadius: m.s(12)))
+                    }
+                    .buttonStyle(RacePressButtonStyle())
+                }
+            }
+        }
+        .padding(m.s(14))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(RaceCarbon().clipShape(shape))
+        .overlay(
+            shape.stroke(
+                isFocusedSlot ? RacePalette.yellow : Color(white: 0.28),
+                lineWidth: isFocusedSlot ? m.s(4) : m.s(2.5)
+            )
+        )
     }
 }
 
@@ -1436,7 +1747,8 @@ struct RaceTimingTower: View {
                 .background(RoundedRectangle(cornerRadius: m.s(8)).fill(RacePalette.rowBg))
             } else {
                 ForEach(Array(visibleSlice.enumerated()), id: \.element.id) { offset, win in
-                    RaceTowerRow(viewModel: viewModel, window: win, position: startIdx + offset + 2, m: m)
+                    let basePos = max(1, viewModel.visibleStageWindowCount) + 1
+                    RaceTowerRow(viewModel: viewModel, window: win, position: startIdx + offset + basePos, m: m)
                         .frame(maxHeight: m.s(210))
                 }
                 Spacer(minLength: 0)

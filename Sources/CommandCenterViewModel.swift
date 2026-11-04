@@ -57,6 +57,17 @@ final class CommandCenterViewModel: ObservableObject {
     @Published var showShiftLights: Bool = (UserDefaults.standard.object(forKey: "cf15t.ui.shiftLights") as? Bool) ?? true {
         didSet { UserDefaults.standard.set(showShiftLights, forKey: "cf15t.ui.shiftLights") }
     }
+    /// Number of visible main Spotlight windows side-by-side in Race Cockpit (1, 2, or 3)
+    @Published var visibleStageWindowCount: Int = {
+        let saved = UserDefaults.standard.integer(forKey: "cf15t.ui.visibleStageWindowCount")
+        return (saved >= 1 && saved <= 3) ? saved : 1
+    }() {
+        didSet {
+            UserDefaults.standard.set(visibleStageWindowCount, forKey: "cf15t.ui.visibleStageWindowCount")
+        }
+    }
+    @Published var secondaryStageWindowIDs: [CGWindowID] = []
+    @Published var activeMultiSlotIndex: Int = 0
     @Published var programSelectionMode: ProgramSelectionMode = .automatic
     @Published var customAllowedApps: Set<String> = [
         "grok bot", "chatgpt", "antigravity", "signal", "whatsapp", "claude", "codex", "cortex", "cubed code gpui", "google chrome"
@@ -747,17 +758,73 @@ final class CommandCenterViewModel: ObservableObject {
 
     // MARK: - Tap Border Window -> Promote to Center Stage + Tile Real Windows
 
-    func promoteWindowToStage(_ window: MonitoredWindow) {
-        ensureWindowIsDisplayed(window)
-        UserDefaults.standard.set(window.appName, forKey: "cf15t.state.lastStageAppName")
-        // Pin the user's selected app on the CF15T Command Center so clicking in Zoom on the laptop never resets it
-        userPinnedWindowUntil = Date().timeIntervalSinceReferenceDate + 3600.0
-
+    func setVisibleStageWindowCount(_ count: Int) {
+        let clamped = min(3, max(1, count))
         withAnimation(.spring(response: 0.24, dampingFraction: 0.85)) {
-            stageWindowID = window.id
+            visibleStageWindowCount = clamped
+            if activeMultiSlotIndex >= clamped {
+                activeMultiSlotIndex = 0
+            }
+        }
+        let stageList = currentStageWindows(from: allDisplayedWindows)
+        if let first = stageList.first {
+            stageWindowID = first.id
+        }
+        secondaryStageWindowIDs = Array(stageList.dropFirst().map { $0.id })
+
+        for win in stageList {
+            refreshSingleWindowInBackground(win)
+        }
+        statusBannerMessage = clamped == 1
+            ? "Showing 1 main window"
+            : "Showing \(clamped) programs side by side (\(stageList.map { $0.appName }.joined(separator: " · ")))"
+    }
+
+    func currentStageWindows(from pool: [MonitoredWindow]) -> [MonitoredWindow] {
+        guard !pool.isEmpty else { return [] }
+        let targetCount = min(max(1, visibleStageWindowCount), pool.count)
+        var chosen: [MonitoredWindow] = []
+        var chosenIDs: Set<CGWindowID> = []
+        var chosenAppKeys: Set<String> = []
+
+        if let primaryID = stageWindowID, let primary = pool.first(where: { $0.id == primaryID }) {
+            chosen.append(primary)
+            chosenIDs.insert(primary.id)
+            chosenAppKeys.insert(normalizedAppKey(primary.appName))
+        } else if let first = pool.first {
+            chosen.append(first)
+            chosenIDs.insert(first.id)
+            chosenAppKeys.insert(normalizedAppKey(first.appName))
         }
 
-        // Refresh the newly promoted stage window's image & digest in the background immediately
+        if targetCount > 1 {
+            for secID in secondaryStageWindowIDs where chosen.count < targetCount {
+                if !chosenIDs.contains(secID), let match = pool.first(where: { $0.id == secID }) {
+                    chosen.append(match)
+                    chosenIDs.insert(match.id)
+                    chosenAppKeys.insert(normalizedAppKey(match.appName))
+                }
+            }
+            // Prefer distinct programs first so 2 or 3 windows show different running apps side by side
+            for w in pool where chosen.count < targetCount {
+                let appKey = normalizedAppKey(w.appName)
+                if !chosenIDs.contains(w.id) && !chosenAppKeys.contains(appKey) && appKey != "system settings" {
+                    chosen.append(w)
+                    chosenIDs.insert(w.id)
+                    chosenAppKeys.insert(appKey)
+                }
+            }
+            for w in pool where chosen.count < targetCount {
+                if !chosenIDs.contains(w.id) {
+                    chosen.append(w)
+                    chosenIDs.insert(w.id)
+                }
+            }
+        }
+        return chosen
+    }
+
+    private func refreshSingleWindowInBackground(_ window: MonitoredWindow) {
         backgroundScanQueue.async { [weak self] in
             let snap = WindowTilingEngine.shared.captureWindowSnapshot(windowID: window.id)
             let cropped = AppContentFeedExtractor.shared.cropActiveConversationImage(from: snap, for: window)
@@ -773,10 +840,45 @@ final class CommandCenterViewModel: ObservableObject {
                 self.openWindows[idx].liveDigest = digest
             }
         }
+    }
+
+    func promoteWindowToStage(_ window: MonitoredWindow) {
+        ensureWindowIsDisplayed(window)
+        UserDefaults.standard.set(window.appName, forKey: "cf15t.state.lastStageAppName")
+        // Pin the user's selected app on the CF15T Command Center so clicking in Zoom on the laptop never resets it
+        userPinnedWindowUntil = Date().timeIntervalSinceReferenceDate + 3600.0
+
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.85)) {
+            if visibleStageWindowCount <= 1 {
+                stageWindowID = window.id
+                activeMultiSlotIndex = 0
+            } else {
+                var currentIDs = currentStageWindows(from: allDisplayedWindows).map { $0.id }
+                if let existingIdx = currentIDs.firstIndex(of: window.id) {
+                    activeMultiSlotIndex = existingIdx
+                } else {
+                    let slot = min(max(0, activeMultiSlotIndex), visibleStageWindowCount - 1)
+                    if slot < currentIDs.count {
+                        currentIDs[slot] = window.id
+                    } else {
+                        currentIDs.append(window.id)
+                    }
+                    if let first = currentIDs.first {
+                        stageWindowID = first
+                    }
+                    secondaryStageWindowIDs = Array(currentIDs.dropFirst())
+                    activeMultiSlotIndex = (slot + 1) % visibleStageWindowCount
+                }
+            }
+        }
+
+        refreshSingleWindowInBackground(window)
 
         // Keep the main laptop screen (e.g. Zoom Meeting) completely undisturbed!
         // The selected app is now in the CF15T Spotlight and all steering-wheel buttons control it in the background.
-        statusBannerMessage = "Controlling \(window.appName) here — Main laptop screen stays untouched"
+        statusBannerMessage = visibleStageWindowCount <= 1
+            ? "Controlling \(window.appName) here — Main laptop screen stays untouched"
+            : "Added \(window.appName) to side-by-side main view — Main laptop screen stays untouched"
     }
 
     /// Explicitly brings a window onto the main laptop screen only when the user taps '📺 ON LAPTOP'.
