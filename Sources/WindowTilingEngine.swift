@@ -59,7 +59,8 @@ final class WindowTilingEngine {
             "Dock", "Spotlight", "Wallpaper", "TextInputMenuAgent", "UniversalControl",
             "CursorUIViewService", "ScreenCaptureKit", "loginwindow",
             "universalAccessAuthWarn", "MobileDeviceUpdater", "CoreServicesUIAgent",
-            "UserNotificationCenter", "SecurityAgent"
+            "UserNotificationCenter", "SecurityAgent", "screencapture", "Screenshot",
+            "screencaptureui", "CF15T Command Center", "CF15TCommandCenter"
         ]
 
         for entry in infoList {
@@ -101,10 +102,10 @@ final class WindowTilingEngine {
             perAppWindowCounter[ownerPID] = idx + 1
 
             let winID = CGWindowID(windowNumber)
-            let isPriorityWindow = (winID == priorityStageWindowID) || (result.count < 5)
+            let isPriorityWindow = (winID == priorityStageWindowID) || (result.count < 10)
             let detectedPlatform = detectPlatform(appName: resolvedAppName, bundleID: bundleID, windowTitle: title)
             var preview: NSImage? = nil
-            if capturePreviews && isPriorityWindow {
+            if capturePreviews {
                 preview = captureWindowSnapshot(windowID: winID)
             }
 
@@ -120,8 +121,8 @@ final class WindowTilingEngine {
                 appIcon: appIcon,
                 previewImage: preview
             )
+            win.focusedContentImage = AppContentFeedExtractor.shared.cropActiveConversationImage(from: preview, for: win)
             if isPriorityWindow {
-                win.focusedContentImage = AppContentFeedExtractor.shared.cropActiveConversationImage(from: preview, for: win)
                 win.liveDigest = AppContentFeedExtractor.shared.extractLiveDigest(for: win)
             } else {
                 win.liveDigest = AppContentFeedExtractor.shared.cachedOrFallbackDigest(for: win)

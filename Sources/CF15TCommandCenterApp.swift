@@ -21,8 +21,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let myPID = ProcessInfo.processInfo.processIdentifier
-        for app in NSRunningApplication.runningApplications(withBundleIdentifier: "com.paulcooper.cf15t-command-center") where app.processIdentifier != myPID {
-            app.forceTerminate()
+        for app in NSWorkspace.shared.runningApplications where app.processIdentifier != myPID {
+            let bid = app.bundleIdentifier ?? ""
+            let name = app.localizedName ?? ""
+            let exe = app.executableURL?.lastPathComponent ?? ""
+            if bid == "com.paulcooper.cf15t-command-center" || name == "CF15T Command Center" || exe == "CF15TCommandCenter" {
+                app.forceTerminate()
+            }
         }
 
         NSApp.setActivationPolicy(.regular)

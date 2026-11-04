@@ -58,28 +58,28 @@ final class AppContentFeedExtractor {
             cropH = h * 0.90
 
         case .aiAgentThread:
-            // Zoom into the active chat response column (skipping left thread list & right editor/artifact pane)
+            // Crop to the main conversation & workspace area with a wide aspect ratio so it fills the live screen box
             let bid = (window.bundleIdentifier ?? "").lowercased()
             if w > 900 && (window.platform == .codex || bid.contains("com.openai.codex") || appLower.contains("codex")) {
-                cropX = w * 0.27
-                cropW = w * 0.51
-                cropY = h * 0.34
-                cropH = h * 0.58
-            } else if w > 900 && (window.platform == .antigravity || appLower.contains("antigravity")) {
-                cropX = w * 0.18
-                cropW = w * 0.41
-                cropY = h * 0.08
-                cropH = h * 0.80
-            } else if w > 880 && (appLower.contains("chatgpt") || appLower.contains("claude") || appLower.contains("signal")) {
                 cropX = w * 0.22
                 cropW = w * 0.76
-                cropY = h * 0.14
-                cropH = h * 0.78
-            } else {
-                cropX = w * 0.02
-                cropW = w * 0.96
                 cropY = h * 0.08
                 cropH = h * 0.86
+            } else if w > 900 && (window.platform == .antigravity || appLower.contains("antigravity")) {
+                cropX = w * 0.16
+                cropW = w * 0.82
+                cropY = h * 0.06
+                cropH = h * 0.88
+            } else if w > 880 && (appLower.contains("chatgpt") || appLower.contains("claude") || appLower.contains("signal")) {
+                cropX = w * 0.20
+                cropW = w * 0.78
+                cropY = h * 0.08
+                cropH = h * 0.86
+            } else {
+                cropX = w * 0.01
+                cropW = w * 0.98
+                cropY = h * 0.05
+                cropH = h * 0.92
             }
 
         case .browserDocument:
@@ -903,9 +903,9 @@ final class AppContentFeedExtractor {
             // Group vertically consecutive lines that belong to the same message bubble or response paragraph
             if let last = merged.last,
                last.hasExplicitFrame && block.hasExplicitFrame,
-               (block.frame.minY - last.frame.maxY) < 26,
-               abs(block.frame.minX - last.frame.minX) < 85,
-               last.text.count < 240 {
+               (block.frame.minY - last.frame.maxY) < 28,
+               abs(block.frame.minX - last.frame.minX) < 95,
+               last.text.count < 360 {
                 let combinedText = "\(last.text) \(block.text)"
                 let unionFrame = last.frame.union(block.frame)
                 merged[merged.count - 1] = SpatialTextBlock(
@@ -932,9 +932,9 @@ final class AppContentFeedExtractor {
         let selectedBlocks: [SpatialTextBlock] = {
             switch style {
             case .messagingChat, .aiAgentThread:
-                return Array(blocks.suffix(7))
+                return Array(blocks.suffix(10))
             case .browserDocument, .mediaNowPlaying, .systemInspector:
-                return Array(blocks.prefix(7))
+                return Array(blocks.prefix(10))
             }
         }()
 

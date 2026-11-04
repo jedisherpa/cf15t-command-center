@@ -91,9 +91,9 @@ struct RaceMetrics {
     func s(_ v: CGFloat) -> CGFloat { v * k }
     func t(_ v: CGFloat) -> CGFloat { v * k * textScale }
 
-    var towerWidth: CGFloat { isBar ? s(470) : s(540) }
-    var liveScreenWidth: CGFloat { isBar ? s(470) : s(600) }
-    var wheelHeight: CGFloat { isBar ? s(116) : s(168) }
+    var towerWidth: CGFloat { isBar ? s(460) : s(510) }
+    var liveScreenWidth: CGFloat { isBar ? s(620) : s(740) }
+    var wheelHeight: CGFloat { isBar ? s(116) : s(164) }
     var gripWidth: CGFloat { isBar ? s(190) : s(250) }
     var hubOrb: CGFloat { isBar ? s(74) : s(104) }
     var gripOrb: CGFloat { isBar ? s(88) : s(126) }
@@ -578,20 +578,41 @@ struct RaceFocusPanel: View {
     let m: RaceMetrics
 
     @State private var showWholeWindow: Bool = false
+    @State private var isLiveWindowFullWidth: Bool = false
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: m.s(30))
 
-        VStack(spacing: m.s(16)) {
+        VStack(spacing: m.s(14)) {
             if let info = info {
-                RaceFocusHeader(viewModel: viewModel, info: info, m: m)
+                RaceFocusHeader(
+                    viewModel: viewModel,
+                    info: info,
+                    m: m,
+                    isLiveWindowFullWidth: $isLiveWindowFullWidth
+                )
 
-                HStack(alignment: .top, spacing: m.s(20)) {
-                    RaceLiveScreen(info: info, m: m, showWholeWindow: $showWholeWindow)
+                if isLiveWindowFullWidth {
+                    RaceLiveScreen(
+                        info: info,
+                        m: m,
+                        showWholeWindow: $showWholeWindow,
+                        isLiveWindowFullWidth: $isLiveWindowFullWidth
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    HStack(alignment: .top, spacing: m.s(16)) {
+                        RaceLiveScreen(
+                            info: info,
+                            m: m,
+                            showWholeWindow: $showWholeWindow,
+                            isLiveWindowFullWidth: $isLiveWindowFullWidth
+                        )
                         .frame(width: m.liveScreenWidth)
-                    RaceRightNowColumn(viewModel: viewModel, info: info, m: m)
+                        RaceRightNowColumn(viewModel: viewModel, info: info, m: m)
+                    }
+                    .frame(maxHeight: .infinity)
                 }
-                .frame(maxHeight: .infinity)
 
                 RaceSteeringWheel(viewModel: viewModel, info: info, m: m)
                     .frame(height: m.wheelHeight)
@@ -599,7 +620,7 @@ struct RaceFocusPanel: View {
                 RaceEmptySpotlight(viewModel: viewModel, m: m)
             }
         }
-        .padding(m.s(20))
+        .padding(m.s(18))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(RaceCarbon().clipShape(shape))
         .overlay(shape.stroke(RacePalette.yellow, lineWidth: m.s(5)))
@@ -684,43 +705,65 @@ struct RaceFocusHeader: View {
     @ObservedObject var viewModel: CommandCenterViewModel
     let info: RaceAppInfo
     let m: RaceMetrics
+    @Binding var isLiveWindowFullWidth: Bool
 
     var body: some View {
         let whereLabel: String = viewModel.isZoomRunningOnLaptop
             ? "🎥 ZOOM STAYS ON LAPTOP · CONTROLLING HERE"
             : "CONTROLLING IN BACKGROUND · LAPTOP UNTOUCHED"
-        let iconSize: CGFloat = m.isBar ? m.s(70) : m.s(88)
+        let iconSize: CGFloat = m.isBar ? m.s(68) : m.s(82)
 
-        HStack(spacing: m.s(18)) {
+        HStack(spacing: m.s(14)) {
             RaceAppIcon(window: info.window, size: iconSize, ring: RacePalette.yellow, ringWidth: m.s(4))
-                .padding(m.s(4))
+                .padding(m.s(2))
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(whereLabel)
-                    .font(RaceType.font(m.s(20), .heavy))
+                    .font(RaceType.font(m.s(19), .heavy))
                     .foregroundColor(RacePalette.yellow)
-                    .tracking(m.s(1.5))
+                    .tracking(m.s(1.2))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                 Text(info.window.appName.uppercased())
-                    .font(RaceType.font(m.isBar ? m.s(52) : m.s(62), .black))
+                    .font(RaceType.font(m.isBar ? m.s(48) : m.s(58), .black))
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
             }
 
-            Spacer(minLength: m.s(8))
+            Spacer(minLength: m.s(6))
+
+            Button(action: {
+                withAnimation(.spring(response: 0.24, dampingFraction: 0.85)) {
+                    isLiveWindowFullWidth.toggle()
+                }
+            }) {
+                VStack(spacing: m.s(2)) {
+                    Text(isLiveWindowFullWidth ? "📖 SPLIT VIEW" : "🔍 FULL WINDOW")
+                        .font(RaceType.font(m.s(19), .black, italic: false))
+                    Text(isLiveWindowFullWidth ? "Show text + window" : "Expand live screen")
+                        .font(RaceType.font(m.s(14), .semibold, italic: false))
+                        .opacity(0.85)
+                }
+                .foregroundColor(isLiveWindowFullWidth ? .black : RacePalette.yellow)
+                .padding(.horizontal, m.s(14))
+                .padding(.vertical, m.s(10))
+                .background(RoundedRectangle(cornerRadius: m.s(14)).fill(isLiveWindowFullWidth ? RacePalette.yellow : RacePalette.rowBg))
+                .overlay(RoundedRectangle(cornerRadius: m.s(14)).stroke(RacePalette.yellow, lineWidth: m.s(2)))
+                .contentShape(RoundedRectangle(cornerRadius: m.s(14)))
+            }
+            .buttonStyle(RacePressButtonStyle())
 
             Button(action: { viewModel.bringWindowToLaptopScreen(info.window) }) {
                 VStack(spacing: m.s(2)) {
                     Text("📺 ON LAPTOP")
-                        .font(RaceType.font(m.s(20), .black, italic: false))
+                        .font(RaceType.font(m.s(19), .black, italic: false))
                     Text("Bring to main screen")
                         .font(RaceType.font(m.s(14), .semibold, italic: false))
                         .opacity(0.8)
                 }
                 .foregroundColor(.white)
-                .padding(.horizontal, m.s(16))
+                .padding(.horizontal, m.s(14))
                 .padding(.vertical, m.s(10))
                 .background(RoundedRectangle(cornerRadius: m.s(14)).fill(RacePalette.rowBg))
                 .overlay(RoundedRectangle(cornerRadius: m.s(14)).stroke(RacePalette.edge, lineWidth: m.s(2)))
@@ -772,7 +815,7 @@ struct RaceLiveScreen: View {
     let info: RaceAppInfo
     let m: RaceMetrics
     @Binding var showWholeWindow: Bool
-    @State private var showChatTextMode: Bool = false
+    @Binding var isLiveWindowFullWidth: Bool
 
     var body: some View {
         let win: MonitoredWindow = info.window
@@ -780,85 +823,66 @@ struct RaceLiveScreen: View {
         let wholeImg: NSImage? = win.previewImage ?? win.focusedContentImage
         let activeImg: NSImage? = showWholeWindow ? wholeImg : closeUpImg
         let hasValidImg: Bool = (activeImg?.size.width ?? 0) > 4 && (activeImg?.size.height ?? 0) > 4
-        let shouldShowChatPane: Bool = showChatTextMode || !hasValidImg
-        let outer = RoundedRectangle(cornerRadius: m.s(24))
-        let inner = RoundedRectangle(cornerRadius: m.s(18))
+        let outer = RoundedRectangle(cornerRadius: m.s(22))
+        let inner = RoundedRectangle(cornerRadius: m.s(16))
 
         let badgeLabel: String = {
-            if shouldShowChatPane {
+            if !hasValidImg {
                 return "LIVE · chat response"
             }
-            return showWholeWindow ? "LIVE · whole window" : "LIVE · close-up"
+            return showWholeWindow ? "LIVE · whole window (tap for close-up)" : "LIVE · close-up (tap for whole window)"
         }()
 
-        VStack(spacing: m.s(8)) {
-            Button(action: {
-                if !hasValidImg {
-                    showChatTextMode = true
-                } else if !showChatTextMode && !showWholeWindow {
-                    showChatTextMode = true
-                } else if showChatTextMode {
-                    showChatTextMode = false
-                    showWholeWindow = true
+        Button(action: {
+            showWholeWindow.toggle()
+        }) {
+            ZStack(alignment: .topLeading) {
+                inner.fill(Color(red: 0.04, green: 0.04, blue: 0.055))
+
+                if hasValidImg, let img = activeImg {
+                    Image(nsImage: img)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipShape(inner)
+                } else if !info.digest.lines.isEmpty {
+                    RaceLiveChatResponsePane(info: info, m: m)
+                        .padding(.top, m.s(46))
+                        .padding(.horizontal, m.s(14))
+                        .padding(.bottom, m.s(12))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .clipShape(inner)
                 } else {
-                    showWholeWindow = false
-                    showChatTextMode = false
+                    RaceAppIcon(window: win, size: m.s(110))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            }) {
-                ZStack(alignment: .topLeading) {
-                    inner.fill(Color(red: 0.04, green: 0.04, blue: 0.055))
 
-                    if !shouldShowChatPane, let img = activeImg {
-                        Image(nsImage: img)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .clipShape(inner)
-                    } else if !info.digest.lines.isEmpty {
-                        RaceLiveChatResponsePane(info: info, m: m)
-                            .padding(.top, m.s(46))
-                            .padding(.horizontal, m.s(14))
-                            .padding(.bottom, m.s(12))
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            .clipShape(inner)
-                    } else {
-                        RaceAppIcon(window: win, size: m.s(110))
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-
-                    HStack(spacing: m.s(8)) {
-                        Text("●")
-                            .foregroundColor(RacePalette.red)
-                        Text(badgeLabel)
-                            .foregroundColor(.white)
-                    }
-                    .font(RaceType.font(m.s(20), .heavy, italic: false))
-                    .padding(.horizontal, m.s(16))
-                    .padding(.vertical, m.s(6))
-                    .background(Capsule().fill(Color.black.opacity(0.82)))
-                    .padding(m.s(12))
+                HStack(spacing: m.s(8)) {
+                    Text("●")
+                        .foregroundColor(RacePalette.red)
+                    Text(badgeLabel)
+                        .foregroundColor(.white)
                 }
-                .padding(m.s(6))
-                .background(
-                    outer.fill(
-                        LinearGradient(
-                            colors: [Color(white: 0.29), Color(white: 0.10)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+                .font(RaceType.font(m.s(18), .heavy, italic: false))
+                .padding(.horizontal, m.s(14))
+                .padding(.vertical, m.s(5))
+                .background(Capsule().fill(Color.black.opacity(0.84)))
+                .padding(m.s(10))
+            }
+            .padding(m.s(5))
+            .background(
+                outer.fill(
+                    LinearGradient(
+                        colors: [Color(white: 0.29), Color(white: 0.10)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
                 )
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(RacePressButtonStyle())
-
-            if !m.isBar {
-                Text("👆 Tap the screen to switch: close-up · chat response · whole window")
-                    .font(RaceType.font(m.s(19), .semibold, italic: false))
-                    .foregroundColor(RacePalette.muted)
-                    .lineLimit(1)
-            }
+            )
+            .contentShape(Rectangle())
         }
+        .buttonStyle(RacePressButtonStyle())
     }
 }
 
@@ -914,7 +938,7 @@ struct RaceLiveChatResponsePane: View {
     }
 }
 
-// MARK: - Right Now · Question · Before This
+// MARK: - Right Now · Live Window Contents & Feed (Fills Full Height With Zero Empty Space)
 
 struct RaceRightNowColumn: View {
     @ObservedObject var viewModel: CommandCenterViewModel
@@ -926,55 +950,89 @@ struct RaceRightNowColumn: View {
         return lines.last(where: { $0.isIncomingOrAgent && $0.text.count >= 6 }) ?? lines.last
     }
 
+    private var latestUserPrompt: DigestFeedLine? {
+        info.digest.lines.last(where: { !$0.isIncomingOrAgent })
+    }
+
     private var rightNowText: String {
         let appName = info.window.appName
         guard let latest = primaryLine else {
             return "\(appName) is open and ready."
         }
-        if !latest.isIncomingOrAgent {
-            return "You asked: \"\(RaceAppInfo.clip(latest.text, 200))\""
-        }
-        let sentences = RaceAppInfo.splitSentences(latest.text.replacingOccurrences(of: " • ", with: ". "))
-        if let q = info.question {
-            let rest = sentences.filter { !$0.contains("?") }.prefix(2).joined(separator: " ")
-            let trimmed = rest.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty || trimmed == q {
-                return "\(appName) has a question for you."
-            }
-            return RaceAppInfo.clip(trimmed, 220)
-        }
-        let headline = sentences.prefix(2).joined(separator: " ")
-        return RaceAppInfo.clip(headline.isEmpty ? latest.text : headline, 220)
+        let cleaned = latest.text.replacingOccurrences(of: " • ", with: "\n• ")
+        return RaceAppInfo.clip(cleaned, 540)
     }
 
     var body: some View {
         let lines: [DigestFeedLine] = info.digest.lines
         let primaryID: String? = primaryLine?.id
-        let earlier: [DigestFeedLine] = Array(lines.filter { $0.id != primaryID }.suffix(m.isBar ? 2 : 3))
-        let showHistory: Bool = !earlier.isEmpty && (!m.isBar || info.question == nil)
+        let promptID: String? = latestUserPrompt?.id
+        let earlier: [DigestFeedLine] = Array(
+            lines.filter { $0.id != primaryID && $0.id != promptID }.suffix(m.isBar ? 3 : 5)
+        )
+        let cardShape = RoundedRectangle(cornerRadius: m.s(18))
 
-        VStack(alignment: .leading, spacing: m.s(14)) {
-            RaceSectionLabel(text: "RIGHT NOW", m: m)
-
-            Text(rightNowText)
-                .font(RaceType.font(m.isBar ? m.t(28) : m.t(36), .heavy, italic: false))
-                .foregroundColor(.white)
-                .lineLimit(m.isBar ? 3 : 4)
-                .minimumScaleFactor(0.65)
-                .fixedSize(horizontal: false, vertical: true)
-
+        VStack(alignment: .leading, spacing: m.s(10)) {
             if let q = info.question {
                 RaceRadioQuestion(viewModel: viewModel, info: info, question: q, m: m)
             }
 
-            if showHistory {
-                RaceSectionLabel(text: "BEFORE THIS", m: m)
-                ForEach(earlier) { line in
-                    RaceHistoryRow(line: line, appName: info.window.appName, m: m)
+            if let prompt = latestUserPrompt, prompt.id != primaryID {
+                HStack(alignment: .top, spacing: m.s(10)) {
+                    Text("🗣️ YOU:")
+                        .font(RaceType.font(m.t(19), .heavy))
+                        .foregroundColor(Color(red: 0.56, green: 0.78, blue: 1.0))
+                    Text(RaceAppInfo.clip(prompt.text, 180))
+                        .font(RaceType.font(m.t(20), .semibold, italic: false))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.75)
                 }
+                .padding(.horizontal, m.s(14))
+                .padding(.vertical, m.s(8))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: m.s(12)).fill(Color(red: 0.10, green: 0.16, blue: 0.28)))
+                .overlay(RoundedRectangle(cornerRadius: m.s(12)).stroke(Color(red: 0.24, green: 0.42, blue: 0.72), lineWidth: m.s(1.5)))
             }
 
-            Spacer(minLength: 0)
+            // Main Live Window Content Reader (expands to fill space)
+            VStack(alignment: .leading, spacing: m.s(6)) {
+                HStack {
+                    Text("💬 \(info.window.appName.uppercased()) · LIVE WINDOW TEXT")
+                        .font(RaceType.font(m.s(19), .heavy))
+                        .foregroundColor(RacePalette.yellow)
+                        .tracking(m.s(1.2))
+                    Spacer()
+                    if !info.window.windowTitle.isEmpty && info.window.windowTitle.lowercased() != info.window.appName.lowercased() {
+                        Text(RaceAppInfo.clip(info.window.windowTitle, 42))
+                            .font(RaceType.font(m.s(16), .semibold, italic: false))
+                            .foregroundColor(RacePalette.muted)
+                            .lineLimit(1)
+                    }
+                }
+
+                Text(rightNowText)
+                    .font(RaceType.font(m.isBar ? m.t(23) : m.t(27), .bold, italic: false))
+                    .foregroundColor(.white)
+                    .lineLimit(m.isBar ? 5 : 8)
+                    .minimumScaleFactor(0.68)
+                    .fixedSize(horizontal: false, vertical: false)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .padding(.horizontal, m.s(16))
+            .padding(.vertical, m.s(12))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(cardShape.fill(Color(red: 0.06, green: 0.09, blue: 0.07)))
+            .overlay(cardShape.stroke(RacePalette.green.opacity(0.55), lineWidth: m.s(2)))
+
+            if !earlier.isEmpty {
+                RaceSectionLabel(text: "MORE IN THIS WINDOW", m: m)
+                VStack(spacing: m.s(6)) {
+                    ForEach(earlier) { line in
+                        RaceHistoryRow(line: line, appName: info.window.appName, m: m)
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -1081,14 +1139,14 @@ struct RaceHistoryRow: View {
                 .frame(width: m.s(6))
             Text(glyph)
                 .font(.system(size: m.t(24)))
-            Text("\(who): \(RaceAppInfo.clip(line.text, 120))")
-                .font(RaceType.font(m.t(25), .semibold, italic: false))
-                .foregroundColor(Color(white: 0.80))
-                .lineLimit(1)
+            Text("\(who): \(RaceAppInfo.clip(line.text, 180))")
+                .font(RaceType.font(m.t(21), .semibold, italic: false))
+                .foregroundColor(Color(white: 0.86))
+                .lineLimit(2)
             Spacer(minLength: 0)
         }
-        .padding(.trailing, m.s(16))
-        .padding(.vertical, m.s(9))
+        .padding(.trailing, m.s(14))
+        .padding(.vertical, m.s(7))
         .fixedSize(horizontal: false, vertical: true)
         .background(RoundedRectangle(cornerRadius: m.s(10)).fill(Color(white: 0.09)))
         .clipShape(RoundedRectangle(cornerRadius: m.s(10)))
