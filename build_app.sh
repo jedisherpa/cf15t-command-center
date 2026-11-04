@@ -50,7 +50,7 @@ EOF
 
 echo "Compiling CF15T Command Center..."
 swiftc \
-    -O \
+    -Onone \
     -target arm64-apple-macosx15.0 \
     -framework Cocoa \
     -framework SwiftUI \
@@ -62,6 +62,7 @@ swiftc \
     -framework IOKit \
     -framework Vision \
     "$PROJECT_DIR/Sources/Models.swift" \
+    "$PROJECT_DIR/Sources/DisplayTargetManager.swift" \
     "$PROJECT_DIR/Sources/AppContentFeedExtractor.swift" \
     "$PROJECT_DIR/Sources/CoreAudioMicManager.swift" \
     "$PROJECT_DIR/Sources/UniversalVoiceDictationEngine.swift" \
@@ -76,6 +77,7 @@ swiftc \
     "$PROJECT_DIR/Sources/VoiceSlotEditorSheet.swift" \
     "$PROJECT_DIR/Sources/CommandCenterSettingsSheet.swift" \
     "$PROJECT_DIR/Sources/FullControlTouchDockView.swift" \
+    "$PROJECT_DIR/Sources/RaceCockpitView.swift" \
     "$PROJECT_DIR/Sources/CommandCenterViews.swift" \
     "$PROJECT_DIR/Sources/CF15TCommandCenterApp.swift" \
     -o "$MACOS_DIR/CF15TCommandCenter"

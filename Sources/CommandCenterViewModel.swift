@@ -49,6 +49,14 @@ final class CommandCenterViewModel: ObservableObject {
 
     // Adjustable Layout, Visuals & Program Selection Settings (Nearsighted & Sensory-Friendly Big Defaults)
     @Published var isShowingSettingsSheet: Bool = false
+    /// false = Race Cockpit (main look), true = the older tile-grid "Classic view"
+    @Published var isClassicLayout: Bool = UserDefaults.standard.bool(forKey: "cf15t.ui.classicLayout") {
+        didSet { UserDefaults.standard.set(isClassicLayout, forKey: "cf15t.ui.classicLayout") }
+    }
+    /// The row of "busy" shift lights across the top of the Race Cockpit (can be turned off for low-sensory use)
+    @Published var showShiftLights: Bool = (UserDefaults.standard.object(forKey: "cf15t.ui.shiftLights") as? Bool) ?? true {
+        didSet { UserDefaults.standard.set(showShiftLights, forKey: "cf15t.ui.shiftLights") }
+    }
     @Published var programSelectionMode: ProgramSelectionMode = .automatic
     @Published var customAllowedApps: Set<String> = [
         "grok bot", "chatgpt", "antigravity", "signal", "whatsapp", "claude", "codex", "google chrome"
@@ -160,6 +168,43 @@ final class CommandCenterViewModel: ObservableObject {
     }
 
     // MARK: - Computed Stage & Border Windows + Program Filtering
+
+    func toggleClassicLayout() {
+        isClassicLayout.toggle()
+        statusBannerMessage = isClassicLayout ? "Switched to Classic view" : "Switched to Race Cockpit view"
+    }
+
+    // MARK: - Which screen the Command Center is on (15.6" CF15T, 12.3" bar, or laptop)
+
+    var commandCenterScreenName: String {
+        guard let screen = DisplayTargetManager.shared.commandCenterScreen() else { return "No screen" }
+        return screen.localizedName
+    }
+
+    func moveCommandCenterToNextScreen() {
+        guard let next = DisplayTargetManager.shared.cycleToNextScreen() else {
+            statusBannerMessage = "No other screen found"
+            return
+        }
+        reapplyCommandCenterWindowFrame()
+        statusBannerMessage = "Command Center moved to \(next.localizedName)"
+        objectWillChange.send()
+    }
+
+    func setCommandCenterScreen(key: String) {
+        DisplayTargetManager.shared.preferredScreenKey = key
+        reapplyCommandCenterWindowFrame()
+        objectWillChange.send()
+    }
+
+    private func reapplyCommandCenterWindowFrame() {
+        let docked = (operatingMode == .fullControl && isFullControlDocked)
+        _ = CursorSnapbackEngine.shared.configureCommandCenterWindowFrame(
+            dockedTopBar: docked,
+            dockHeight: currentDockReserveHeight,
+            alwaysOnTop: operatingMode == .fullControl || isLaptopLidClosed
+        )
+    }
 
     func normalizedAppKey(_ appName: String) -> String {
         appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

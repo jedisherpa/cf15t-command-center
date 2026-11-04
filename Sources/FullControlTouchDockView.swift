@@ -36,6 +36,25 @@ struct DualOperatingModeSwitcherBanner: View {
         let isFullControl = (viewModel.operatingMode == .fullControl)
 
         return HStack(spacing: 10) {
+            // Back to the Race Cockpit (main look)
+            Button(action: {
+                viewModel.toggleClassicLayout()
+            }) {
+                VStack(spacing: 2) {
+                    Text("🏎️")
+                        .font(.system(size: 24))
+                    Text("COCKPIT")
+                        .font(.system(size: 12, weight: .black, design: .rounded))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(red: 1.0, green: 0.83, blue: 0.0))
+                .foregroundColor(.black)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
             // Mode 1 Button: LAPTOP + TOUCH (Orchestrate)
             Button(action: {
                 viewModel.setOperatingMode(.orchestrate)

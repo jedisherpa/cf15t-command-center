@@ -65,20 +65,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let contentView = CommandCenterMainView(viewModel: viewModel)
         let hostingController = NSHostingController(rootView: contentView)
 
-        // Default to 1500x880 on main screen, or full visibleFrame on external 1920x1080 CF15T screen
+        // Full screen on the touchscreen (15.6" CF15T or 12.3" bar), or a centred window on the laptop alone
         let screens = NSScreen.screens
-        let targetScreen: NSScreen = {
-            if screens.count > 1 {
-                return screens.dropFirst().first(where: {
-                    Int($0.frame.width) == 1920 && Int($0.frame.height) == 1080
-                }) ?? screens[1]
-            }
-            return screens.first!
-        }()
+        let targetScreen: NSScreen = DisplayTargetManager.shared.commandCenterScreen() ?? screens.first!
+        let onExternal = !DisplayTargetManager.shared.isBuiltIn(targetScreen)
 
         let initialFrame: NSRect = {
-            if screens.count > 1 {
-                return targetScreen.visibleFrame
+            if onExternal {
+                return DisplayTargetManager.shared.usableFrame(for: targetScreen)
             } else {
                 let vis = targetScreen.visibleFrame
                 let w = min(1400, vis.width * 0.94)
@@ -100,9 +94,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = "CF15T Auxiliary Command Center — Windows • Agents • Voice (Grok Bot ⇄ Dot)"
         window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        // Hide the traffic-light buttons so they don't sit on top of the touch controls (quit from the menu bar item)
+        window.standardWindowButton(.closeButton)?.isHidden = true
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
+        // The app places itself on the touchscreen; don't let touches near the top drag the window around
+        window.isMovable = false
         window.backgroundColor = NSColor(calibratedRed: 0.05, green: 0.06, blue: 0.09, alpha: 1.0)
         window.contentViewController = hostingController
-        window.minSize = NSSize(width: 1024, height: 640)
+        window.minSize = NSSize(width: 640, height: 360)
         window.setFrame(initialFrame, display: true)
         window.collectionBehavior = [.managed, .fullScreenPrimary]
         window.makeKeyAndOrderFront(nil)
@@ -130,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Toggle Keep-Awake (Prevent Sleep & Screensaver)", action: #selector(toggleKeepAwakeAction), keyEquivalent: "k")
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Tile Open Windows (Center Stage + Border)", action: #selector(tileNowAction), keyEquivalent: "t")
-        menu.addItem(withTitle: "Move Command Center to CF15T Screen", action: #selector(moveToCF15TAction), keyEquivalent: "")
+        menu.addItem(withTitle: "Move Command Center to Next Screen", action: #selector(moveToNextScreenAction), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Quit CF15T Command Center", action: #selector(quitAction), keyEquivalent: "q")
 
@@ -186,8 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.applyRealScreenTilingNow()
     }
 
-    @objc private func moveToCF15TAction() {
-        viewModel.snapPanelToCF15T()
+    @objc private func moveToNextScreenAction() {
+        viewModel.moveCommandCenterToNextScreen()
     }
 
     @objc private func quitAction() {

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct CommandCenterSettingsSheet: View {
     @ObservedObject var viewModel: CommandCenterViewModel
@@ -19,6 +20,7 @@ struct CommandCenterSettingsSheet: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    section0ScreenAndLook
                     section1SelectionMode
                     section2ProgramSelectionGrid
                     section3VisualsAndSliders
@@ -26,7 +28,7 @@ struct CommandCenterSettingsSheet: View {
                 .padding(20)
             }
         }
-        .frame(width: 980, height: 690)
+        .frame(minWidth: 720, idealWidth: 980, maxWidth: 980, minHeight: 380, idealHeight: 690, maxHeight: 690)
         .background(Color(red: 0.04, green: 0.05, blue: 0.09))
     }
 
@@ -85,6 +87,87 @@ struct CommandCenterSettingsSheet: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
         .background(Color(red: 0.07, green: 0.09, blue: 0.14))
+    }
+
+    // MARK: - Section 0: Which Screen & Which Look
+
+    private var section0ScreenAndLook: some View {
+        let manager = DisplayTargetManager.shared
+        let screens: [NSScreen] = NSScreen.screens
+        let currentKey: String = manager.preferredScreenKey
+
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("SCREEN & LOOK")
+                .font(.system(size: 13, weight: .black, design: .monospaced))
+                .foregroundColor(Color(red: 1.0, green: 0.83, blue: 0.0))
+
+            Text("Which screen shows the Command Center? The layout adjusts itself for the 15.6-inch screen or the shorter 12.3-inch wide screen.")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white.opacity(0.8))
+
+            VStack(spacing: 8) {
+                screenChoiceRow(
+                    title: "Automatic",
+                    detail: "CF15T first, otherwise any other touchscreen",
+                    isSelected: currentKey == DisplayTargetManager.autoKey
+                ) {
+                    viewModel.setCommandCenterScreen(key: DisplayTargetManager.autoKey)
+                }
+                ForEach(screens, id: \.self) { screen in
+                    let key: String = manager.key(for: screen)
+                    screenChoiceRow(
+                        title: screen.localizedName,
+                        detail: manager.friendlyName(for: screen),
+                        isSelected: currentKey == key
+                    ) {
+                        viewModel.setCommandCenterScreen(key: key)
+                    }
+                }
+            }
+
+            HStack(spacing: 12) {
+                Toggle("Race Cockpit look (turn off for Classic view)", isOn: Binding(
+                    get: { !viewModel.isClassicLayout },
+                    set: { viewModel.isClassicLayout = !$0 }
+                ))
+                Toggle("Busy shift lights across the top", isOn: $viewModel.showShiftLights)
+            }
+            .font(.system(size: 13, weight: .bold))
+            .foregroundColor(.white)
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.05)))
+    }
+
+    private func screenChoiceRow(title: String, detail: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(isSelected ? Color(red: 1.0, green: 0.83, blue: 0.0) : .white.opacity(0.5))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .black))
+                        .foregroundColor(.white)
+                    Text(detail)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected ? Color(red: 1.0, green: 0.83, blue: 0.0).opacity(0.14) : Color.white.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isSelected ? Color(red: 1.0, green: 0.83, blue: 0.0) : Color.white.opacity(0.12), lineWidth: 1.5)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Section 1: Program Selection Mode

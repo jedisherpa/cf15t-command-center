@@ -87,16 +87,8 @@ final class CursorSnapbackEngine {
     // MARK: - Resolve CF15T Screen (Supports Both Dual-Screen and Lid-Closed Single-Screen Clamshell)
 
     func resolveCF15TScreen() -> NSScreen? {
-        let screens = NSScreen.screens
-        if let external = screens.first(where: { scr in
-            if let id = scr.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID {
-                return CGDisplayIsBuiltin(id) == 0
-            }
-            return false
-        }) {
-            return external
-        }
-        return screens.first
+        // Whichever touchscreen the Command Center lives on (15.6" CF15T, 12.3" bar, or the user's pick)
+        return DisplayTargetManager.shared.commandCenterScreen()
     }
 
     // MARK: - Move Command Center Window to CF15T Display & Shield Against Lid-Close Window Dumping
@@ -117,7 +109,7 @@ final class CursorSnapbackEngine {
             return "No active display found"
         }
 
-        let vis = targetScreen.visibleFrame
+        let vis = DisplayTargetManager.shared.usableFrame(for: targetScreen)
         window.collectionBehavior = [.managed, .fullScreenPrimary, .canJoinAllSpaces]
 
         if dockedTopBar {
@@ -134,7 +126,7 @@ final class CursorSnapbackEngine {
             window.orderFrontRegardless()
             return "Docked Touch Control Bar at top of \(targetScreen.localizedName) — Live App active below"
         } else {
-            window.minSize = NSSize(width: 900, height: 540)
+            window.minSize = NSSize(width: 640, height: 360)
             // When alwaysOnTop is true (FULL CONTROL mode or Laptop Lid Closed), keep Command Center at .floating
             // so macOS NEVER dumps open laptop windows on top of the Command Center!
             window.level = alwaysOnTop ? .floating : .normal

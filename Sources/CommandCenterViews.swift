@@ -24,6 +24,9 @@ struct CommandCenterMainView: View {
         Group {
             if viewModel.operatingMode == .fullControl && viewModel.isFullControlDocked {
                 FullControlDockedTopBarView(viewModel: viewModel)
+            } else if !viewModel.isClassicLayout {
+                // Main look: Spotlight · Race Cockpit (adapts to the 15.6" and the 12.3" wide screen)
+                RaceCockpitView(viewModel: viewModel)
             } else {
                 VStack(spacing: 6) {
                     // 1. Compact, High-Contrast Mode + App Switcher + View Mode Bar

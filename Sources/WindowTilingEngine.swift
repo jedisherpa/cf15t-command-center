@@ -700,7 +700,7 @@ final class WindowTilingEngine {
             }) ?? primaryScreen
 
         case .externalDisplay:
-            chosenScreen = screens.first(where: { scr in
+            chosenScreen = DisplayTargetManager.shared.commandCenterScreen() ?? screens.first(where: { scr in
                 if let id = scr.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID {
                     return CGDisplayIsBuiltin(id) == 0
                 }
