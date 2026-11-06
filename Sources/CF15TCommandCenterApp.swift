@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.appearance = NSAppearance(named: .darkAqua)
 
+        DisplayTargetManager.shared.ensureExtendedDesktopIfLidOpen()
         setupMenuBarStatusItem()
         createAndShowMainWindow()
 
@@ -46,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleScreenParametersChanged() {
         Task { @MainActor in
+            DisplayTargetManager.shared.ensureExtendedDesktopIfLidOpen()
             let lidClosed = KeepAwakeWorker.shared.isLaptopLidClosed()
             if lidClosed && viewModel.operatingMode != .fullControl {
                 viewModel.setOperatingMode(.fullControl)

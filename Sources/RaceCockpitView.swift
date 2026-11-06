@@ -342,9 +342,9 @@ struct RaceShiftLightStrip: View {
     let m: RaceMetrics
     let inline: Bool
 
-    private func ledColor(_ i: Int) -> Color {
-        if i < 5 { return RacePalette.green }
-        if i < 10 { return RacePalette.yellow }
+    private func ledColor(_ i: Int, total: Int) -> Color {
+        if i < total / 3 { return RacePalette.green }
+        if i < (total * 2) / 3 { return RacePalette.yellow }
         return RacePalette.red
     }
 
@@ -352,15 +352,16 @@ struct RaceShiftLightStrip: View {
         if viewModel.showShiftLights {
             let cpu: Double = info?.cpu ?? 0
             let fraction: Double = min(1.0, cpu / 40.0)
-            let lit: Int = Int((fraction * 15.0).rounded())
+            let totalLEDs: Int = inline ? 9 : 15
+            let lit: Int = Int((fraction * Double(totalLEDs)).rounded())
             let pct: Int = Int((fraction * 100.0).rounded())
-            let ledW: CGFloat = inline ? m.s(22) : m.s(70)
-            let ledH: CGFloat = inline ? m.s(20) : m.s(28)
+            let ledW: CGFloat = inline ? m.s(18) : m.s(70)
+            let ledH: CGFloat = inline ? m.s(18) : m.s(28)
             let appName: String = info?.window.appName.uppercased() ?? "NO APP"
             let leftLabel: String = cpu < 1.0 ? "\(appName) IS RESTING" : "\(appName) IS BUSY"
 
             Button(action: { viewModel.showShiftLights = false }) {
-                HStack(spacing: inline ? m.s(5) : m.s(9)) {
+                HStack(spacing: inline ? m.s(4) : m.s(9)) {
                     if !inline {
                         Text(leftLabel)
                             .font(RaceType.font(m.s(20), .heavy))
@@ -368,18 +369,21 @@ struct RaceShiftLightStrip: View {
                             .lineLimit(1)
                             .padding(.trailing, m.s(10))
                     }
-                    ForEach(0..<15, id: \.self) { i in
+                    ForEach(0..<totalLEDs, id: \.self) { i in
                         let on: Bool = i < lit
+                        let col = ledColor(i, total: totalLEDs)
                         Capsule()
-                            .fill(on ? ledColor(i) : RacePalette.unlitLED)
+                            .fill(on ? col : RacePalette.unlitLED)
                             .frame(width: ledW, height: ledH)
-                            .overlay(Capsule().stroke(on ? ledColor(i) : RacePalette.edge, lineWidth: m.s(2)))
-                            .shadow(color: on ? ledColor(i) : .clear, radius: m.s(7))
+                            .overlay(Capsule().stroke(on ? col : RacePalette.edge, lineWidth: m.s(2)))
+                            .shadow(color: on ? col : .clear, radius: m.s(7))
                     }
                     Text("◐ \(pct)%")
                         .font(RaceType.font(m.s(20), .heavy))
                         .foregroundColor(RacePalette.yellow)
-                        .padding(.leading, m.s(8))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.leading, m.s(6))
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: inline ? m.s(44) : m.s(42))

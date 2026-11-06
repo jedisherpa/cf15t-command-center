@@ -24,6 +24,28 @@ final class DisplayTargetManager {
 
     // MARK: - Screen facts
 
+    /// When the laptop lid is open and an external touchscreen (such as Z1-2 1280×480 or CF15T 1920×1080)
+    /// is plugged in, macOS may default to hardware mirroring, shrinking the laptop screen.
+    /// Automatically un-mirror so the laptop stays at full Retina resolution and the touchscreen is an independent display.
+    func ensureExtendedDesktopIfLidOpen() {
+        guard !KeepAwakeWorker.shared.isLaptopLidClosed() else { return }
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 1 else { return }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return }
+
+        let mirroredIDs = ids.filter { CGDisplayMirrorsDisplay($0) != kCGNullDirectDisplay }
+        guard !mirroredIDs.isEmpty else { return }
+
+        var config: CGDisplayConfigRef? = nil
+        if CGBeginDisplayConfiguration(&config) == .success, let cfg = config {
+            for id in mirroredIDs {
+                CGConfigureDisplayMirrorOfDisplay(cfg, id, kCGNullDirectDisplay)
+            }
+            CGCompleteDisplayConfiguration(cfg, .permanently)
+        }
+    }
+
     func displayID(of screen: NSScreen) -> CGDirectDisplayID? {
         screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
     }
